@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 맞춤 일자리 안내 에이전트</title>
+    <!-- Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="glass-bg">
+        <div class="circle circle-1"></div>
+        <div class="circle circle-2"></div>
+    </div>
+    <div class="app-container">
+        <!-- Sidebar Navigation / Logo -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="logo-icon">🎯</span>
+                <div class="logo-text">
+                    <h1>JobAgent</h1>
+                    <p>AI Job Matcher</p>
+                </div>
+            </div>
+            <nav class="step-nav">
+                <div class="nav-item active" id="nav-onboarding">
+                    <span class="step-num">1</span>
+                    <span class="step-lbl">이력서 작성</span>
+                </div>
+                <div class="nav-item" id="nav-filters">
+                    <span class="step-num">2</span>
+                    <span class="step-lbl">조건 설정</span>
+                </div>
+                <div class="nav-item" id="nav-jobs">
+                    <span class="step-num">3</span>
+                    <span class="step-lbl">추천 공고</span>
+                </div>
+                <div class="nav-item" id="nav-settings">
+                    <span class="step-num">4</span>
+                    <span class="step-lbl">데일리 메일</span>
+                </div>
+            </nav>
+        </header>
+        <!-- Main Body Grid -->
+        <main class="main-grid">
+            <!-- Left Panel: Chatbot Interface -->
+            <section class="panel panel-left">
+                <div class="panel-header">
+                    <h2>💬 AI 컨설턴트 챗봇</h2>
+                    <div class="panel-header-right">
+                        <span class="status-indicator online">온라인</span>
+                        <button class="btn-reset" id="btn-reset" title="처음부터 다시 시작">🔄 초기화</button>
+                    </div>
+                </div>
+                <div class="chat-container" id="chat-messages">
+                    <!-- Chat bubbles will go here -->
+                </div>
+                <div class="chat-suggestions" id="chat-suggestions">
+                    <!-- Action chips go here -->
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="메시지를 입력하세요..." autocomplete="off">
+                    <button id="btn-send">전송</button>
+                </div>
+            </section>
+            <!-- Right Panel: Tab Contents -->
+            <section class="panel panel-right">
+                <!-- Tab Headers -->
+                <div class="tabs-header">
+                    <button class="tab-btn active" data-tab="tab-resume">📄 이력서 미리보기</button>
+                    <button class="tab-btn" data-tab="tab-filters">⚙️ 스크리닝 필터</button>
+                    <button class="tab-btn" data-tab="tab-jobs">🔍 매칭 공고</button>
+                    <button class="tab-btn" data-tab="tab-settings">✉️ 에이전트 설정</button>
+                </div>
+                <!-- Tab Contents -->
+                <div class="tab-contents">
+                    <!-- Tab 1: Live A4 Resume Preview -->
+                    <div class="tab-content active" id="tab-resume">
+                        <div class="resume-preview-container">
+                            <div class="resume-actions">
+                                <button class="btn btn-primary" id="btn-print">🖨️ PDF/인쇄 내보내기</button>
+                            </div>
+                            <div class="a4-sheet" id="resume-sheet">
+                                <div class="resume-placeholder">
+                                    <p class="placeholder-icon">📄</p>
+                                    <p>챗봇과의 대화를 완료하면<br>여기에 인쇄용 AI 맞춤 이력서가 생성됩니다.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Tab 2: Screening Exclusions & Filters -->
+                    <div class="tab-content" id="tab-filters">
+                        <div class="filter-settings-form">
+                            <h3>🔍 맞춤형 일자리 필터링 조건 설정</h3>
+                            <p class="form-desc">이력서와 키워드가 일치하더라도 아래 원하지 않는 조건에 해당하는 공고는 자동으로 스크리닝 제외됩니다.</p>
+                            <div class="form-group">
+                                <label for="filter-salary">최소 연봉 요구 조건</label>
+                                <div class="range-slider-wrapper">
+                                    <input type="range" id="filter-salary" min="2000" max="8000" step="200" value="3000">
+                                    <span class="range-val" id="val-salary">3,000 만원 이상</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-distance">최대 출퇴근 거리</label>
+                                <div class="range-slider-wrapper">
+                                    <input type="range" id="filter-distance" min="5" max="100" step="5" value="30">
+                                    <span class="range-val" id="val-distance">30 km 이내</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>교대 근무 형태 기피 여부</label>
+                                <div class="toggle-wrapper">
+                                    <input type="checkbox" id="filter-shift" class="toggle-checkbox">
+                                    <label for="filter-shift" class="toggle-label"></label>
+                                    <span class="toggle-text">교대 근무(주야교대 등) 채용 공고 스크리닝 제외</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-success" id="btn-save-filters">💾 필터 조건 저장</button>
+                        </div>
+                    </div>
+                    <!-- Tab 3: Matchings Result -->
+                    <div class="tab-content" id="tab-jobs">
+                        <div class="matching-container">
+                            <div class="matching-header">
+                                <h3>🎯 AI 실시간 추천 공고</h3>
+                                <button class="btn btn-secondary btn-sm" id="btn-refresh-matching">🔄 다시 매칭하기</button>
+                            </div>
+                            <div class="matching-jobs-list" id="jobs-list">
+                                <!-- Matched Job Cards will go here -->
+                                <div class="no-jobs-placeholder">
+                                    <p>아직 등록된 이력서가 없거나 필터 조건에 부합하는 공고가 없습니다.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Tab 4: Agent & Email Settings -->
+                    <div class="tab-content" id="tab-settings">
+                        <div class="agent-settings-form">
+                            <h3>✉️ 데일리 메일링 스케줄러 & API 설정</h3>
+                            <p class="form-desc">AI 모델 및 메일링 스케줄링을 위한 접속 정보를 등록하세요. 정보는 로컬에만 안전하게 보관됩니다.</p>
+
+                            <div class="optional-notice">
+                                <p>💡 <strong>두 항목 모두 선택사항입니다.</strong></p>
+                                <p>입력하지 않아도 챗봇 이력서 작성과 공고 매칭은 정상 이용 가능합니다.</p>
+                                <ul>
+                                    <li><strong>Gemini API Key</strong> — 없으면 기본 템플릿으로 이력서가 생성됩니다. 있으면 AI가 이력서를 더 세련되게 다듬어 줍니다.</li>
+                                    <li><strong>메일 앱 비밀번호</strong> — 없으면 이메일 발송 기능만 비활성화됩니다.</li>
+                                </ul>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="setting-gemini-key">Gemini API Key <span class="optional-badge">선택</span></label>
+                                <input type="password" id="setting-gemini-key" placeholder="AI 이력서 고도화를 위한 API 키 입력 (없어도 됩니다)">
+                                <p class="help-text">키를 입력하지 않으면 기본 템플릿으로 이력서가 생성됩니다. 더 정교한 이력서를 원하시면 <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--primary);">Google AI Studio</a>에서 무료 발급받으세요.</p>
+                            </div>
+                            <h4 class="sub-section-title">📧 발송 이메일 SMTP 설정 <span class="optional-badge">선택</span></h4>
+                            <div class="form-group">
+                                <label for="setting-smtp-user">발송용 이메일 주소</label>
+                                <input type="email" id="setting-smtp-user" placeholder="your-email@gmail.com / naver.com / daum.net 등">
+                                <p class="help-text">Gmail, Naver, Daum/Kakao, Outlook/Hotmail, Nate 메일을 지원합니다. 주소의 @도메인을 보고 발송 서버를 자동으로 선택합니다.</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-smtp-pass">메일 앱 비밀번호</label>
+                                <input type="password" id="setting-smtp-pass" placeholder="메일 서비스에서 발급받은 앱 비밀번호 입력">
+                                <p class="help-text">일반 로그인 비밀번호가 아닌 <strong>앱 비밀번호</strong>가 필요합니다. Gmail: <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--primary);">Google 앱 비밀번호 발급</a> / Naver: 메일 환경설정 → POP3/IMAP → 앱 비밀번호 발급</p>
+                            </div>
+                            <div class="agent-actions">
+                                <button class="btn btn-success" id="btn-save-settings">💾 에이전트 설정 저장</button>
+                                <button class="btn btn-primary" id="btn-test-mail">📧 오늘의 공고 즉시 메일 발송 테스트</button>
+                            </div>
+                            <div class="scheduler-status">
+                                <h4>📅 1주일 메일링 스케줄 정보</h4>
+                                <div class="status-card">
+                                    <p><strong>상태:</strong> <span class="badge badge-success">활성화됨 (매일 아침 08:00 대기 중)</span></p>
+                                    <p><strong>스케줄러:</strong> Activepieces Scheduler (Local Docker Python daemon)</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <!-- Notification Toast -->
+    <div class="toast" id="toast">알림 메시지</div>
+    <script src="script.js"></script>
+</body>
+</html>
