@@ -699,29 +699,69 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
             self.wfile.write(json.dumps({"success": success, "message": msg}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/upload-resume":
-            import cgi
             content_type_hdr = self.headers.get("Content-Type", "")
-            if "multipart/form-data" not in content_type_hdr:
-                self.wfile.write(json.dumps({"error": "multipart/form-data 형식으로 업로드해 주세요."}, ensure_ascii=False).encode('utf-8'))
-                return
-            form = cgi.FieldStorage(fp=self.rfile, headers=self.headers,
-                                    environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type_hdr})
-            file_item = form.get("resume") or form.get("file")
-            if not file_item:
-                self.wfile.write(json.dumps({"error": "파일을 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
+            content_len      = int(self.headers.get("Content-Length", 0))
+
+            if "multipart/form-data" not in content_type_hdr or content_len == 0:
+                self.wfile.write(json.dumps({"error": "파일을 선택해 주세요."}, ensure_ascii=False).encode('utf-8'))
                 return
 
-            file_data = file_item.file.read()
-            filename  = file_item.filename or ""
+            # ── 직접 multipart 파싱 (cgi 모듈 불필요) ──
+            raw_body = self.rfile.read(content_len)
+
+            # boundary 추출: "multipart/form-data; boundary=----Xxx"
+            boundary = None
+            for part in content_type_hdr.split(";"):
+                part = part.strip()
+                if part.startswith("boundary="):
+                    boundary = part[len("boundary="):].strip().strip('"')
+                    break
+
+            if not boundary:
+                self.wfile.write(json.dumps({"error": "multipart boundary를 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
+                return
+
+            sep      = ("--" + boundary).encode()
+            parts    = raw_body.split(sep)
+            file_data = None
+            filename  = ""
+
+            for chunk in parts:
+                if b'Content-Disposition' not in chunk:
+                    continue
+                # 헤더와 바디를 \r\n\r\n 으로 분리
+                if b'\r\n\r\n' in chunk:
+                    header_raw, body_raw = chunk.split(b'\r\n\r\n', 1)
+                else:
+                    continue
+                header_str = header_raw.decode('utf-8', errors='ignore')
+                # name="resume" 또는 name="file" 인 파트 선택
+                if 'name="resume"' not in header_str and 'name="file"' not in header_str:
+                    continue
+                # filename 추출
+                for line in header_str.splitlines():
+                    if 'Content-Disposition' in line:
+                        for token in line.split(';'):
+                            token = token.strip()
+                            if token.startswith('filename='):
+                                filename = token[len('filename='):].strip().strip('"')
+                # 끝의 \r\n 제거
+                file_data = body_raw.rstrip(b'\r\n')
+                break
+
+            if file_data is None:
+                self.wfile.write(json.dumps({"error": "파일 데이터를 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
+                return
+
+            # ── 텍스트 추출 ──
             extracted = ""
-
             if filename.lower().endswith(".pdf"):
                 try:
-                    import pypdf, io
-                    reader = pypdf.PdfReader(io.BytesIO(file_data))
+                    import pypdf, io as _io
+                    reader = pypdf.PdfReader(_io.BytesIO(file_data))
                     for page in reader.pages:
                         extracted += (page.extract_text() or "") + "\n"
-                except ImportError:
+                except Exception as e:
                     extracted = file_data.decode("utf-8", errors="ignore")
             else:
                 extracted = file_data.decode("utf-8", errors="ignore")
@@ -802,7 +842,7 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
                 "count": 10,
                 "fields": "job-title,company,salary,expiration-date,job-category,location-code",
             })
-            saramin_url = f"https://oapi.saramin.co.kr/job-search?{params}"
+            saramin_url = "https://oapi.saramin.co.kr/job-search?" + params
             try:
                 req = urllib.request.Request(saramin_url, headers={"Accept": "application/json"})
                 with urllib.request.urlopen(req, timeout=10) as response:
@@ -810,7 +850,7 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
                     jobs = saramin_data.get("jobs", {}).get("job", [])
                     self.wfile.write(json.dumps({"jobs": jobs, "count": len(jobs)}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
-                self.wfile.write(json.dumps({"error": f"사람인 API 호출 실패: {str(e)}"}, ensure_ascii=False).encode('utf-8'))
+                self.wfile.write(json.dumps({"error": "API 호출 실패: " + str(e)}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/reset":
             query_db("DELETE FROM sent_jobs")
@@ -828,7 +868,7 @@ init_db()
 def run_server():
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Serving local job agent at http://localhost:{PORT}")
+        print("JobAgent server running at http://localhost:" + str(PORT))
         httpd.serve_forever()
 
 if __name__ == "__main__":
