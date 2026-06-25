@@ -88,7 +88,6 @@ def init_db():
         smtp_user TEXT,
         smtp_pass TEXT,
         career TEXT DEFAULT '0',
-        education TEXT DEFAULT '0',
         onboarding_step TEXT DEFAULT 'start'
     )
     """)
@@ -98,7 +97,6 @@ def init_db():
         ("saramin_api_key", "TEXT"),
         ("worknet_api_key", "TEXT"),
         ("career", "TEXT DEFAULT '0'"),
-        ("education", "TEXT DEFAULT '0'"),
         ("resume_text", "TEXT"),
     ]:
         try:
@@ -439,25 +437,97 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"File not found")
 
+    def _send_json(self, obj):
+        """Helper: send 200 + JSON body."""
+        payload = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _handle_upload_resume(self, content_type, content_length):
+        """Body 읽기 -> 텍스트 추출 -> JSON 응답 (헤더 전송 전에 body 완전히 소비)."""
+        if "multipart/form-data" not in content_type or content_length == 0:
+            self._send_json({"error": "파일을 선택해 주세요."})
+            return
+
+        raw_body = self.rfile.read(content_length)
+
+        # boundary 추출
+        boundary = None
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[len("boundary="):].strip().strip('"')
+                break
+
+        if not boundary:
+            self._send_json({"error": "multipart boundary 없음"})
+            return
+
+        sep       = ("--" + boundary).encode()
+        file_data = None
+        filename  = ""
+
+        for chunk in raw_body.split(sep):
+            if b"Content-Disposition" not in chunk:
+                continue
+            if b"\r\n\r\n" not in chunk:
+                continue
+            header_raw, body_raw = chunk.split(b"\r\n\r\n", 1)
+            header_str = header_raw.decode("utf-8", errors="ignore")
+            if 'name="resume"' not in header_str and 'name="file"' not in header_str:
+                continue
+            for line in header_str.splitlines():
+                if "Content-Disposition" in line:
+                    for token in line.split(";"):
+                        token = token.strip()
+                        if token.startswith("filename="):
+                            filename = token[len("filename="):].strip().strip('"')
+            file_data = body_raw.rstrip(b"\r\n")
+            break
+
+        if file_data is None:
+            self._send_json({"error": "파일 데이터를 찾을 수 없습니다."})
+            return
+
+        extracted = ""
+        try:
+            if filename.lower().endswith(".pdf"):
+                import pypdf, io as _io
+                reader = pypdf.PdfReader(_io.BytesIO(file_data))
+                for page in reader.pages:
+                    extracted += (page.extract_text() or "") + "\n"
+            else:
+                extracted = file_data.decode("utf-8", errors="ignore")
+        except Exception as e:
+            extracted = file_data.decode("utf-8", errors="ignore")
+
+        self._send_json({"text": extracted.strip()[:3000]})
+
+
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
 
-        content_type = self.headers.get("Content-Type", "")
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_type   = self.headers.get("Content-Type", "")
+        content_length = int(self.headers.get("Content-Length", 0))
 
-        # Multipart upload is handled separately inside the /api/upload-resume branch
-        if "multipart/form-data" in content_type:
+        # ── 업로드는 body를 먼저 읽고 응답 ──────────────────────────
+        if path == "/api/upload-resume":
+            self._handle_upload_resume(content_type, content_length)
+            return
+
+        # ── 일반 JSON 요청 ────────────────────────────────────────
+        body = self.rfile.read(content_length).decode('utf-8') if content_length else ''
+        try:
+            data = json.loads(body) if body else {}
+        except Exception:
             data = {}
-        else:
-            body = self.rfile.read(content_length).decode('utf-8') if content_length else ''
-            try:
-                data = json.loads(body) if body else {}
-            except Exception:
-                data = {}
 
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
 
         if path == "/api/profile":
@@ -697,76 +767,6 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
 
             success, msg = send_email_report(dict(profile), matched)
             self.wfile.write(json.dumps({"success": success, "message": msg}, ensure_ascii=False).encode('utf-8'))
-
-        elif path == "/api/upload-resume":
-            content_type_hdr = self.headers.get("Content-Type", "")
-            content_len      = int(self.headers.get("Content-Length", 0))
-
-            if "multipart/form-data" not in content_type_hdr or content_len == 0:
-                self.wfile.write(json.dumps({"error": "파일을 선택해 주세요."}, ensure_ascii=False).encode('utf-8'))
-                return
-
-            # ── 직접 multipart 파싱 (cgi 모듈 불필요) ──
-            raw_body = self.rfile.read(content_len)
-
-            # boundary 추출: "multipart/form-data; boundary=----Xxx"
-            boundary = None
-            for part in content_type_hdr.split(";"):
-                part = part.strip()
-                if part.startswith("boundary="):
-                    boundary = part[len("boundary="):].strip().strip('"')
-                    break
-
-            if not boundary:
-                self.wfile.write(json.dumps({"error": "multipart boundary를 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
-                return
-
-            sep      = ("--" + boundary).encode()
-            parts    = raw_body.split(sep)
-            file_data = None
-            filename  = ""
-
-            for chunk in parts:
-                if b'Content-Disposition' not in chunk:
-                    continue
-                # 헤더와 바디를 \r\n\r\n 으로 분리
-                if b'\r\n\r\n' in chunk:
-                    header_raw, body_raw = chunk.split(b'\r\n\r\n', 1)
-                else:
-                    continue
-                header_str = header_raw.decode('utf-8', errors='ignore')
-                # name="resume" 또는 name="file" 인 파트 선택
-                if 'name="resume"' not in header_str and 'name="file"' not in header_str:
-                    continue
-                # filename 추출
-                for line in header_str.splitlines():
-                    if 'Content-Disposition' in line:
-                        for token in line.split(';'):
-                            token = token.strip()
-                            if token.startswith('filename='):
-                                filename = token[len('filename='):].strip().strip('"')
-                # 끝의 \r\n 제거
-                file_data = body_raw.rstrip(b'\r\n')
-                break
-
-            if file_data is None:
-                self.wfile.write(json.dumps({"error": "파일 데이터를 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
-                return
-
-            # ── 텍스트 추출 ──
-            extracted = ""
-            if filename.lower().endswith(".pdf"):
-                try:
-                    import pypdf, io as _io
-                    reader = pypdf.PdfReader(_io.BytesIO(file_data))
-                    for page in reader.pages:
-                        extracted += (page.extract_text() or "") + "\n"
-                except Exception as e:
-                    extracted = file_data.decode("utf-8", errors="ignore")
-            else:
-                extracted = file_data.decode("utf-8", errors="ignore")
-
-            self.wfile.write(json.dumps({"text": extracted.strip()[:3000]}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/worknet-jobs":
             profile = query_db("SELECT * FROM profiles ORDER BY id DESC LIMIT 1", one=True)
