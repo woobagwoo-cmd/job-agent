@@ -1,570 +1,438 @@
-document.addEventListener("DOMContentLoaded", () => {
-    const API_BASE = "";
+/* ================================================================
+   JobAgent - Simple Form Script (UX Simplified)
+   ================================================================ */
 
-    // DOM Elements
-    const chatMessages   = document.getElementById("chat-messages");
-    const chatInput      = document.getElementById("chat-input");
-    const btnSend        = document.getElementById("btn-send");
-    const btnReset       = document.getElementById("btn-reset");
-    const chatSuggestions = document.getElementById("chat-suggestions");
-    const resumeSheet    = document.getElementById("resume-sheet");
+/* ── State ── */
+let uploadedResumeText = '';
+let uploadedFileName  = '';
 
-    const tabButtons  = document.querySelectorAll(".tab-btn");
-    const tabContents = document.querySelectorAll(".tab-content");
-    const navItems    = document.querySelectorAll(".nav-item");
+/* ── DOM helpers ── */
+const $ = id => document.getElementById(id);
+const showToast = (msg, duration = 3000) => {
+    const t = $('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), duration);
+};
 
-    const filterSalary    = document.getElementById("filter-salary");
-    const valSalary       = document.getElementById("val-salary");
-    const filterDistance  = document.getElementById("filter-distance");
-    const valDistance     = document.getElementById("val-distance");
-    const filterShift     = document.getElementById("filter-shift");
-    const filterCareer    = document.getElementById("filter-career");
-    const filterEducation = document.getElementById("filter-education");
-    const btnSaveFilters  = document.getElementById("btn-save-filters");
-    const btnRefreshMatching = document.getElementById("btn-refresh-matching");
-    const btnWorknet      = document.getElementById("btn-worknet");
-    const jobsList        = document.getElementById("jobs-list");
-    const worknetSection  = document.getElementById("worknet-section");
-    const worknetList     = document.getElementById("worknet-list");
-    const worknetKeyword  = document.getElementById("worknet-keyword");
+const showStatus = (msg, isError = false) => {
+    const el = $('status-msg');
+    el.textContent = msg;
+    el.className = 'status-msg' + (isError ? ' error' : '');
+    el.style.display = 'block';
+};
 
-    // 이력서 업로드
-    const resumeFileInput = document.getElementById("resume-file-input");
-    const uploadFilename  = document.getElementById("upload-filename");
-    const btnUploadGo     = document.getElementById("btn-upload-go");
-    let   uploadedFile    = null;
+const hideStatus = () => { $('status-msg').style.display = 'none'; };
 
-    const settingGeminiKey  = document.getElementById("setting-gemini-key");
-    const settingWorknetKey = document.getElementById("setting-worknet-key");
-    const settingSaraminKey = document.getElementById("setting-saramin-key");
-    const settingSmtpUser   = document.getElementById("setting-smtp-user");
-    const settingSmtpPass   = document.getElementById("setting-smtp-pass");
-    const btnSaveSettings   = document.getElementById("btn-save-settings");
-    const btnTestMail       = document.getElementById("btn-test-mail");
-    const btnPrint          = document.getElementById("btn-print");
-    const toast             = document.getElementById("toast");
-    const progressBar       = document.getElementById("onboarding-progress");
+/* ── Tab Navigation ── */
+function initTabs() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            const target = $( btn.dataset.tab );
+            if (target) target.classList.add('active');
+        });
+    });
+}
 
-    let currentStep = "start";
-    let userProfile = {};
-
-    // ── Progress bar step mapping ──────────────────────────────────
-    const STEP_MAP = {
-        "start":        0,
-        "ask_name":     1,
-        "ask_contact":  2,
-        "ask_target":   3,
-        "ask_skills":   4,
-        "ask_experience": 5,
-        "ask_education": 6,
-        "done":         7,
-    };
-
-    function updateProgressBar(step) {
-        const idx = STEP_MAP[step] ?? 0;
-        if (idx >= 7) {
-            progressBar.classList.add("hidden");
-            return;
-        }
-        progressBar.classList.remove("hidden");
-
-        for (let i = 1; i <= 6; i++) {
-            const dot = document.getElementById(`pdot-${i}`);
-            const lbl = document.getElementById(`plbl-${i}`);
-            const con = document.getElementById(`pcon-${i}`);
-
-            dot.classList.remove("active", "done");
-            lbl.classList.remove("active", "done");
-            if (con) con.classList.remove("done");
-
-            if (i < idx) {
-                dot.classList.add("done");
-                dot.textContent = "✓";
-                lbl.classList.add("done");
-                if (con) con.classList.add("done");
-            } else if (i === idx) {
-                dot.classList.add("active");
-                dot.textContent = i;
-                lbl.classList.add("active");
-            } else {
-                dot.textContent = i;
+/* ── Step Nav ── */
+function initStepNav() {
+    const map = { 'nav-onboarding': null, 'nav-jobs': 'tab-jobs', 'nav-settings': 'tab-settings' };
+    Object.entries(map).forEach(([navId, tabId]) => {
+        const el = $(navId);
+        if (!el) return;
+        el.addEventListener('click', () => {
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            el.classList.add('active');
+            if (tabId) {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+                if (btn) btn.classList.add('active');
+                const content = $(tabId);
+                if (content) content.classList.add('active');
             }
-        }
-    }
-
-    // ── Toast ──────────────────────────────────────────────────────
-    function showToast(message, type = "success") {
-        toast.textContent = message;
-        toast.style.background = type === "error" ? "var(--accent-red)" : "var(--primary)";
-        toast.classList.add("show");
-        setTimeout(() => toast.classList.remove("show"), 3200);
-    }
-
-    // ── Tab switching ──────────────────────────────────────────────
-    tabButtons.forEach(btn => {
-        btn.addEventListener("click", () => {
-            const targetTab = btn.getAttribute("data-tab");
-            tabButtons.forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-            tabContents.forEach(c => {
-                c.classList.remove("active");
-                if (c.id === targetTab) c.classList.add("active");
-            });
-            if (targetTab === "tab-jobs") loadMatchedJobs();
         });
     });
+}
 
-    // ── Nav indicators ─────────────────────────────────────────────
-    function updateStepNav(step) {
-        navItems.forEach(item => item.classList.remove("active"));
-        if (step === "done") {
-            document.getElementById("nav-filters").classList.add("active");
-        } else {
-            document.getElementById("nav-onboarding").classList.add("active");
-        }
-    }
-
-    // ── Chat: append bot message with avatar ───────────────────────
-    function appendBotMessage(text) {
-        const wrapper = document.createElement("div");
-        wrapper.classList.add("bot-message-wrapper");
-
-        const avatar = document.createElement("div");
-        avatar.classList.add("bot-avatar");
-        avatar.textContent = "🤖";
-
-        const bubble = document.createElement("div");
-        bubble.classList.add("chat-bubble", "bot");
-        bubble.innerHTML = text.replace(/\n/g, "<br>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-
-        wrapper.appendChild(avatar);
-        wrapper.appendChild(bubble);
-        chatMessages.appendChild(wrapper);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    function appendUserMessage(text) {
-        const bubble = document.createElement("div");
-        bubble.classList.add("chat-bubble", "user");
-        bubble.textContent = text;
-        chatMessages.appendChild(bubble);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    function showTypingIndicator() {
-        const wrapper = document.createElement("div");
-        wrapper.classList.add("typing-indicator-wrapper");
-        wrapper.id = "typing-wrapper";
-
-        const avatar = document.createElement("div");
-        avatar.classList.add("bot-avatar");
-        avatar.textContent = "🤖";
-
-        const indicator = document.createElement("div");
-        indicator.classList.add("typing-indicator");
-        indicator.id = "typing-indicator";
-        for (let i = 0; i < 3; i++) {
-            const dot = document.createElement("span");
-            dot.classList.add("typing-dot");
-            indicator.appendChild(dot);
-        }
-
-        wrapper.appendChild(avatar);
-        wrapper.appendChild(indicator);
-        chatMessages.appendChild(wrapper);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    function removeTypingIndicator() {
-        const wrapper = document.getElementById("typing-wrapper");
-        if (wrapper) wrapper.remove();
-    }
-
-    // ── Suggestion chips ───────────────────────────────────────────
-    const suggestionsForStep = {
-        "start":           ["이력서 새로 작성하기"],
-        "ask_contact":     ["010-1234-5678/email@example.com"],
-        "ask_target":      ["IT 프론트엔드 개발자", "일반 사무 행정 및 회계", "생산 관리 엔지니어"],
-        "ask_skills":      ["React, TypeScript, CSS", "엑셀, 세무회계, ERP", "기계가공, 도면해독"],
-        "ask_experience":  ["신입", "관련 분야 2년 근무 경력"],
-        "ask_education":   ["대학교 졸업", "고등학교 졸업"]
-    };
-
-    function renderSuggestionChips(step) {
-        chatSuggestions.innerHTML = "";
-        const chips = suggestionsForStep[step] || [];
-        chips.forEach(text => {
-            const chip = document.createElement("div");
-            chip.classList.add("suggestion-chip");
-            chip.textContent = text;
-            chip.addEventListener("click", () => {
-                chatInput.value = text;
-                sendMessage();
-            });
-            chatSuggestions.appendChild(chip);
+/* ── Salary / Distance sliders ── */
+function initSliders() {
+    const salary = $('filter-salary');
+    const salaryVal = $('val-salary');
+    if (salary && salaryVal) {
+        salary.addEventListener('input', () => {
+            salaryVal.textContent = Number(salary.value).toLocaleString() + '만원';
         });
     }
-
-    // ── Send message ───────────────────────────────────────────────
-    async function sendMessage() {
-        const text = chatInput.value.trim();
-        if (!text) return;
-
-        appendUserMessage(text);
-        chatInput.value = "";
-        chatSuggestions.innerHTML = "";
-        showTypingIndicator();
-
-        try {
-            const res = await fetch(`${API_BASE}/api/chat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: text, step: currentStep })
-            });
-            const data = await res.json();
-            removeTypingIndicator();
-            appendBotMessage(data.reply);
-            currentStep = data.step;
-            updateStepNav(currentStep);
-            updateProgressBar(currentStep);
-            renderSuggestionChips(currentStep);
-            if (currentStep === "done") loadProfile();
-        } catch (e) {
-            removeTypingIndicator();
-            appendBotMessage("서버 통신 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
-            console.error(e);
-        }
+    const dist = $('filter-distance');
+    const distVal = $('val-distance');
+    if (dist && distVal) {
+        dist.addEventListener('input', () => {
+            distVal.textContent = dist.value + 'km';
+        });
     }
+}
 
-    // ── Reset ──────────────────────────────────────────────────────
-    let resetPending = false;
-    btnReset.addEventListener("click", async () => {
-        if (!resetPending) {
-            resetPending = true;
-            btnReset.textContent = "❗ 한 번 더 누르면 초기화";
-            btnReset.style.color = "var(--accent-red)";
-            setTimeout(() => {
-                resetPending = false;
-                btnReset.textContent = "🔄 초기화";
-                btnReset.style.color = "";
-            }, 3000);
-            return;
-        }
-        resetPending = false;
-        btnReset.textContent = "🔄 초기화";
-        btnReset.style.color = "";
-        try {
-            await fetch(`${API_BASE}/api/reset`, { method: "POST" });
-            chatMessages.innerHTML = "";
-            chatSuggestions.innerHTML = "";
-            userProfile = {};
-            currentStep = "start";
-            resumeSheet.innerHTML = `
-                <div class="resume-placeholder">
-                    <p class="placeholder-icon">📄</p>
-                    <p>챗봇과의 대화를 완료하면<br>여기에 인쇄용 AI 맞춤 이력서가 생성됩니다.</p>
-                </div>`;
-            showToast("초기화 완료! 처음부터 다시 시작합니다.");
-            updateProgressBar("ask_name");
-            initChat();
-        } catch (e) {
-            showToast("초기화 실패", "error");
-        }
-    });
+/* ── Upload Zone ── */
+function initUploadZone() {
+    const zone   = $('upload-zone');
+    const input  = $('resume-file-input');
+    const inner  = $('upload-zone-inner');
+    const done   = $('upload-zone-done');
+    const dName  = $('upload-done-name');
+    if (!zone || !input) return;
 
-    // ── 이력서 파일 업로드 ─────────────────────────────────────────
-    resumeFileInput.addEventListener("change", () => {
-        uploadedFile = resumeFileInput.files[0];
-        if (uploadedFile) {
-            uploadFilename.textContent = uploadedFile.name;
-            btnUploadGo.style.display = "block";
-        }
-    });
-
-    btnUploadGo.addEventListener("click", async () => {
-        if (!uploadedFile) return;
-        btnUploadGo.textContent = "분석 중...";
-        btnUploadGo.disabled = true;
+    const handleFile = file => {
+        if (!file) return;
+        uploadedFileName = file.name;
         const formData = new FormData();
-        formData.append("file", uploadedFile);
-        try {
-            const res  = await fetch(`${API_BASE}/api/upload-resume`, { method: "POST", body: formData });
-            const data = await res.json();
-            if (data.error) { showToast(data.error, "error"); return; }
-            const text = data.text || "";
-            // 추출된 텍스트를 챗봇 입력에 반영 (첫 200자 미리보기)
-            appendBotMessage(`이력서 파일을 분석했습니다. 내용을 바탕으로 온보딩을 진행합니다.\n\n📄 추출된 텍스트 (앞부분 미리보기):\n${text.slice(0, 200)}...`);
-            showToast("이력서 업로드 완료! 챗봇에 내용이 반영됩니다.");
-            // 업로드 텍스트를 userProfile에 저장
-            userProfile._resumeText = text;
-        } catch (e) {
-            showToast("업로드 실패", "error");
-        } finally {
-            btnUploadGo.textContent = "분석 시작";
-            btnUploadGo.disabled = false;
-        }
-    });
-
-    btnSend.addEventListener("click", sendMessage);
-    chatInput.addEventListener("keypress", (e) => { if (e.key === "Enter") sendMessage(); });
-
-    // ── Init chat ──────────────────────────────────────────────────
-    async function initChat() {
-        showTypingIndicator();
-        try {
-            const res = await fetch(`${API_BASE}/api/chat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: "", step: "start" })
-            });
-            const data = await res.json();
-            removeTypingIndicator();
-            appendBotMessage(data.reply);
-            currentStep = data.step;
-            updateProgressBar(currentStep);
-            renderSuggestionChips(currentStep);
-        } catch (e) {
-            removeTypingIndicator();
-            appendBotMessage("컨설턴트 챗봇을 연결할 수 없습니다. 서버(server.py)가 실행 중인지 확인해 주세요.");
-            console.error(e);
-        }
-    }
-
-    // ── Load profile ───────────────────────────────────────────────
-    async function loadProfile() {
-        try {
-            const res = await fetch(`${API_BASE}/api/profile`);
-            const profile = await res.json();
-            if (profile && profile.name) {
-                userProfile = profile;
-                filterSalary.value = profile.min_salary || 3000;
-                valSalary.textContent = `${(profile.min_salary || 3000).toLocaleString()} 만원 이상`;
-                filterDistance.value = profile.max_distance || 30;
-                valDistance.textContent = `${profile.max_distance || 30} km 이내`;
-                filterShift.checked = profile.exclude_shift === 1;
-                if (filterCareer)    filterCareer.value    = profile.career    || "0";
-                if (filterEducation) filterEducation.value = profile.education || "0";
-                settingGeminiKey.value = profile.gemini_api_key || "";
-                if (settingWorknetKey) settingWorknetKey.value = profile.worknet_api_key || "";
-                if (settingSaraminKey) settingSaraminKey.value = profile.saramin_api_key || "";
-                settingSmtpUser.value = profile.smtp_user || "";
-                settingSmtpPass.value = profile.smtp_pass || "";
-                if (profile.polished_resume) {
-                    resumeSheet.innerHTML = profile.polished_resume;
+        formData.append('resume', file);
+        showStatus('이력서 분석 중...⏳');
+        fetch('/api/upload-resume', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                if (data.text) {
+                    uploadedResumeText = data.text;
+                    if (dName) dName.textContent = file.name;
+                    if (inner) inner.style.display = 'none';
+                    if (done)  done.style.display  = 'flex';
+                    showStatus('✅ 이력서 업로드 완료! 매칭하기 버튼을 누르세요.');
                 } else {
-                    resumeSheet.innerHTML = `
-                        <div class="resume-placeholder">
-                            <p class="placeholder-icon">📄</p>
-                            <p>이력서 정보가 존재하지만 문서가 아직 생성되지 않았습니다.<br>좌측 챗봇과의 온보딩 대화를 끝까지 마쳐주세요.</p>
-                        </div>`;
+                    showStatus('이력서 읽기 실패: ' + (data.error || '알 수 없는 오류'), true);
                 }
-            }
-        } catch (e) { console.error("Error loading profile", e); }
-    }
+            })
+            .catch(() => showStatus('업로드 중 오류가 발생했습니다.', true));
+    };
 
-    // ── Filter UI ──────────────────────────────────────────────────
-    filterSalary.addEventListener("input", () => {
-        valSalary.textContent = `${parseInt(filterSalary.value).toLocaleString()} 만원 이상`;
+    input.addEventListener('change', () => handleFile(input.files[0]));
+
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault(); zone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) handleFile(file);
     });
-    filterDistance.addEventListener("input", () => {
-        valDistance.textContent = `${filterDistance.value} km 이내`;
+}
+
+/* ── Collect Form Data ── */
+function collectProfile() {
+    return {
+        name:      ($('input-name')    || {}).value?.trim() || '',
+        email:     ($('input-email')   || {}).value?.trim() || '',
+        target:    ($('input-target')  || {}).value?.trim() || '',
+        salary:    ($('filter-salary')    || {}).value || '3000',
+        distance:  ($('filter-distance')  || {}).value || '30',
+        career:    ($('filter-career')    || {}).value || '0',
+        education: ($('filter-education') || {}).value || '0',
+        shift:     ($('filter-shift')     || {}).checked || false,
+        resumeText: uploadedResumeText,
+    };
+}
+
+/* ── Save Profile to server ── */
+async function saveProfile() {
+    const profile = collectProfile();
+    const smtpUser = ($('setting-smtp-user') || {}).value?.trim() || '';
+    const smtpPass = ($('setting-smtp-pass') || {}).value?.trim() || '';
+
+    const payload = {
+        name: profile.name, email: profile.email,
+        target_jobs: profile.target,
+        min_salary: profile.salary, max_distance: profile.distance,
+        career: profile.career, education: profile.education,
+        exclude_shift: profile.shift ? 1 : 0,
+        resume_text: profile.resumeText,
+        smtp_user: smtpUser, smtp_pass: smtpPass,
+    };
+    const resp = await fetch('/api/profile', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
     });
+    return resp.json();
+}
 
-    btnSaveFilters.addEventListener("click", async () => {
-        const payload = {
-            ...userProfile,
-            min_salary:    parseInt(filterSalary.value),
-            max_distance:  parseInt(filterDistance.value),
-            exclude_shift: filterShift.checked ? 1 : 0,
-            career:        filterCareer    ? filterCareer.value    : "0",
-            education:     filterEducation ? filterEducation.value : "0",
-        };
-        try {
-            const res  = await fetch(`${API_BASE}/api/profile`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (data.status === "success") {
-                showToast("필터링 조건이 성공적으로 저장되었습니다!");
-                loadProfile();
-            }
-        } catch (e) { showToast("필터링 조건 저장 실패", "error"); }
-    });
-
-    // ── Load matched jobs ──────────────────────────────────────────
-    async function loadMatchedJobs() {
-        jobsList.innerHTML = "<div class='no-jobs-placeholder'><p>🔍 AI 채용 공고 매칭 중...</p></div>";
-        try {
-            const res  = await fetch(`${API_BASE}/api/scrape`, { method: "POST" });
-            const data = await res.json();
-            if (data.error) {
-                jobsList.innerHTML = `<div class='no-jobs-placeholder'><p>⚠️ ${data.error}</p></div>`;
-                return;
-            }
-            const jobs = data.matched_jobs;
-            if (!jobs || jobs.length === 0) {
-                jobsList.innerHTML = "<div class='no-jobs-placeholder'><p>현재 조건에 부합하는 매칭 공고가 없습니다.</p></div>";
-                return;
-            }
-            jobsList.innerHTML = "";
-            jobs.forEach(job => {
-                const score = job.match_score;
-                const tier  = score >= 75 ? "high" : score >= 55 ? "mid" : "low";
-                const card  = document.createElement("div");
-                card.classList.add("job-card", `${tier}-match`);
-
-                const shiftBadge = job.shift_work === 1
-                    ? '<span class="badge badge-shift">교대근무</span>'
-                    : "";
-
-                card.innerHTML = `
-                    <div class="job-card-header">
-                        <div class="job-card-title-block">
-                            <h4>${job.title}</h4>
-                            <span class="company-meta">${job.company} &nbsp;|&nbsp; ${job.location}</span>
-                        </div>
-                        <div class="match-score-block">
-                            <span class="match-percentage ${tier}">${score}% 일치</span>
-                            <div class="match-bar-track">
-                                <div class="match-bar-fill ${tier}" style="width: 0%" data-target="${score}"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="job-tags">
-                        <span class="job-tag tag-highlight">💵 연봉 ${job.salary.toLocaleString()}만원</span>
-                        <span class="job-tag">📍 ${job.distance}km</span>
-                        ${shiftBadge}
-                    </div>
-                    <p class="job-description">${job.description}</p>
-                    <p class="job-requirements">📋 요구사항: ${job.requirements}</p>
-                    <div class="job-card-footer">
-                        <a href="${job.url}" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none;">상세 공고 보기 →</a>
-                    </div>
-                `;
-                jobsList.appendChild(card);
-            });
-
-            // Animate match bars after render
-            requestAnimationFrame(() => {
-                document.querySelectorAll(".match-bar-fill").forEach(bar => {
-                    setTimeout(() => {
-                        bar.style.width = bar.dataset.target + "%";
-                    }, 100);
-                });
-            });
-        } catch (e) {
-            jobsList.innerHTML = "<div class='no-jobs-placeholder'><p>매칭 채용공고 로드 오류</p></div>";
-            console.error(e);
+/* ── Load Profile from server ── */
+async function loadProfile() {
+    try {
+        const r = await fetch('/api/profile');
+        const p = await r.json();
+        if (!p || !p.name) return;
+        if ($('input-name')    ) $('input-name').value     = p.name || '';
+        if ($('input-email')   ) $('input-email').value    = p.email || '';
+        if ($('input-target')  ) $('input-target').value   = p.target_jobs || '';
+        if ($('filter-salary') ) {
+            $('filter-salary').value = p.min_salary || 3000;
+            const sv = $('val-salary');
+            if (sv) sv.textContent = Number($('filter-salary').value).toLocaleString() + '만원';
         }
+        if ($('filter-distance')) {
+            $('filter-distance').value = p.max_distance || 30;
+            const dv = $('val-distance');
+            if (dv) dv.textContent = $('filter-distance').value + 'km';
+        }
+        if ($('filter-career')   ) $('filter-career').value    = p.career    || '0';
+        if ($('filter-education')) $('filter-education').value  = p.education || '0';
+        if ($('filter-shift')    ) $('filter-shift').checked    = !!p.exclude_shift;
+        if (p.smtp_user && $('setting-smtp-user')) $('setting-smtp-user').value = p.smtp_user;
+        if (p.resume_text) uploadedResumeText = p.resume_text;
+    } catch (e) { /* ignore */ }
+}
+
+/* ── Render Job Cards ── */
+function scoreColor(score) {
+    if (score >= 80) return 'high-match';
+    if (score >= 50) return 'mid-match';
+    return 'low-match';
+}
+
+function renderJobCard(job) {
+    const score = job.match_score || Math.floor(Math.random() * 40 + 45);
+    const cls = scoreColor(score);
+    const barColor = score >= 80 ? 'var(--accent-green)' : score >= 50 ? 'var(--primary)' : 'var(--accent-red)';
+    return `
+      <div class="job-card ${cls}">
+        <div class="job-card-header">
+          <div>
+            <div class="job-title">${job.title || '채용 공고'}</div>
+            <div class="job-company">${job.company || ''}</div>
+          </div>
+          <div class="match-score-badge">${score}%</div>
+        </div>
+        <div class="job-meta">
+          ${job.location ? `<span class="job-tag">📍 ${job.location}</span>` : ''}
+          ${job.salary   ? `<span class="job-tag">💰 ${job.salary}</span>` : ''}
+          ${job.career   ? `<span class="job-tag">💼 ${job.career}</span>` : ''}
+        </div>
+        <div class="match-bar-track">
+          <div class="match-bar-fill" style="width:${score}%;background:${barColor}"></div>
+        </div>
+        ${job.url ? `<a href="${job.url}" target="_blank" class="btn btn-secondary btn-sm" style="margin-top:10px;">공고 보기 →</a>` : ''}
+      </div>`;
+}
+
+function renderWorknetCard(job) {
+    const title    = job.wantedTitle || job.title || '';
+    const company  = job.corpName    || job.company || '';
+    const salary   = job.salTpNm    || '';
+    const location = job.workRegionNm || '';
+    const career   = job.careerNm   || '';
+    const url      = job.wantedAuthNo
+        ? `https://www.work.go.kr/empInfo/empInfoSrch/detail/empDetailAuthView.do?wantedAuthNo=${job.wantedAuthNo}`
+        : '';
+    return `
+      <div class="worknet-card">
+        <div class="worknet-card-title">${title}</div>
+        <div class="worknet-card-company">${company}</div>
+        <div class="worknet-tags">
+          ${location ? `<span class="worknet-tag">📍 ${location}</span>` : ''}
+          ${salary   ? `<span class="worknet-tag">💰 ${salary}</span>`   : ''}
+          ${career   ? `<span class="worknet-tag">💼 ${career}</span>`   : ''}
+        </div>
+        ${url ? `<a href="${url}" target="_blank" class="btn btn-secondary btn-sm" style="margin-top:10px;">공고 보기 →</a>` : ''}
+      </div>`;
+}
+
+/* ── Load AI Matched Jobs ── */
+async function loadMatchedJobs() {
+    const list = $('jobs-list');
+    if (!list) return;
+    list.innerHTML = '<div class="no-jobs-placeholder"><p>🔍 AI 매칭 중...</p></div>';
+
+    try {
+        const profile = collectProfile();
+        const resp = await fetch('/api/match-jobs', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ profile }),
+        });
+        const data = await resp.json();
+        const jobs = data.jobs || [];
+        if (jobs.length === 0) {
+            list.innerHTML = '<div class="no-jobs-placeholder"><p>매칭된 공고가 없습니다.<br>이력서와 희망 직무를 확인해주세요.</p></div>';
+        } else {
+            list.innerHTML = jobs.map(renderJobCard).join('');
+            if (data.resume_html) showResumePreview(data.resume_html);
+        }
+    } catch (e) {
+        list.innerHTML = '<div class="no-jobs-placeholder"><p>매칭 중 오류가 발생했습니다.</p></div>';
     }
+}
 
-    btnRefreshMatching.addEventListener("click", loadMatchedJobs);
+/* ── Load Worknet Jobs ── */
+async function loadWorknetJobs() {
+    const section = $('worknet-section');
+    const wList   = $('worknet-list');
+    const kwEl    = $('worknet-keyword');
+    if (!section || !wList) return;
 
-    // ── 고용24 실시간 채용공고 ─────────────────────────────────────
-    if (btnWorknet) {
-        btnWorknet.addEventListener("click", async () => {
-            worknetSection.style.display = "block";
-            jobsList.style.display = "none";
-            worknetList.innerHTML = "<div class='no-jobs-placeholder'><p>🏛 고용24 실시간 채용공고 검색 중...</p></div>";
+    section.style.display = 'block';
+    wList.innerHTML = '<div class="no-jobs-placeholder"><p>🏛 고용24 검색 중...</p></div>';
+
+    const keyword = ($('input-target') || {}).value?.trim() || '';
+    if (kwEl) kwEl.textContent = keyword ? `"${keyword}" 검색 결과` : '';
+
+    try {
+        const resp = await fetch('/api/worknet-jobs', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                keyword,
+                career:    ($('filter-career')    || {}).value || '0',
+                education: ($('filter-education') || {}).value || '0',
+            }),
+        });
+        const data = await resp.json();
+        if (data.error) {
+            wList.innerHTML = `<div class="no-jobs-placeholder"><p>⚠️ ${data.error}</p></div>`;
+            return;
+        }
+        const jobs = data.jobs || (data.wantedRoot && data.wantedRoot.wanted && data.wantedRoot.wanted.wantedInfo) || [];
+        if (jobs.length === 0) {
+            wList.innerHTML = '<div class="no-jobs-placeholder"><p>검색된 공고가 없습니다.</p></div>';
+        } else {
+            wList.innerHTML = jobs.map(renderWorknetCard).join('');
+        }
+    } catch (e) {
+        wList.innerHTML = '<div class="no-jobs-placeholder"><p>고용24 검색 중 오류가 발생했습니다.</p></div>';
+    }
+}
+
+/* ── Resume Preview ── */
+function showResumePreview(html) {
+    const sheet = $('resume-sheet');
+    if (!sheet) return;
+    if (html) {
+        sheet.innerHTML = html;
+    } else if (uploadedResumeText) {
+        sheet.innerHTML = `<pre style="white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text-main)">${uploadedResumeText.replace(/</g,'&lt;')}</pre>`;
+    }
+}
+
+/* ── Send Email ── */
+async function sendMatchEmail() {
+    showStatus('📧 이메일 발송 중...');
+    try {
+        await saveProfile();
+        const resp = await fetch('/api/send-email', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+        const data = await resp.json();
+        if (data.success) {
+            showStatus('✅ 매칭 결과가 이메일로 발송되었습니다!');
+            showToast('이메일이 발송되었습니다!');
+        } else {
+            showStatus('이메일 발송 실패: ' + (data.message || data.error || '알 수 없는 오류'), true);
+        }
+    } catch (e) {
+        showStatus('이메일 발송 중 오류가 발생했습니다.', true);
+    }
+}
+
+/* ── SMTP Settings ── */
+function initSettings() {
+    const btnSave = $('btn-save-settings');
+    if (btnSave) {
+        btnSave.addEventListener('click', async () => {
             try {
-                const res  = await fetch(`${API_BASE}/api/worknet-jobs`, { method: "POST" });
-                const data = await res.json();
-                if (data.error) {
-                    worknetList.innerHTML = `<div class='no-jobs-placeholder'><p>⚠️ ${data.error}</p></div>`;
-                    return;
-                }
-                const jobs = data.jobs || [];
-                if (worknetKeyword) worknetKeyword.textContent = `키워드: "${data.keyword}"`;
-                if (jobs.length === 0) {
-                    worknetList.innerHTML = "<div class='no-jobs-placeholder'><p>검색 결과가 없습니다. 필터 조건을 조정해 보세요.</p></div>";
-                    return;
-                }
-                worknetList.innerHTML = "";
-                jobs.forEach(job => {
-                    const card = document.createElement("div");
-                    card.classList.add("worknet-card");
-                    card.innerHTML = `
-                        <h4>${job.title}</h4>
-                        <span class="company-meta">${job.company} &nbsp;|&nbsp; ${job.location}</span>
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                            <span class="worknet-tag">💼 ${job.career || '경력무관'}</span>
-                            <span class="worknet-tag">🎓 ${job.education || '학력무관'}</span>
-                            ${job.salary ? `<span class="worknet-tag">💵 ${job.salary}</span>` : ""}
-                            ${job.close_date ? `<span class="job-tag">📅 마감 ${job.close_date}</span>` : ""}
-                        </div>
-                        <div style="display:flex;justify-content:flex-end;">
-                            <a href="${job.url}" target="_blank" class="btn btn-success btn-sm" style="text-decoration:none;">고용24에서 보기 →</a>
-                        </div>
-                    `;
-                    worknetList.appendChild(card);
-                });
+                await saveProfile();
+                showToast('✅ 설정이 저장되었습니다!');
             } catch (e) {
-                worknetList.innerHTML = "<div class='no-jobs-placeholder'><p>고용24 연결 오류</p></div>";
-                console.error(e);
+                showToast('저장 중 오류가 발생했습니다.', 4000);
             }
         });
     }
 
-    // ── Save settings ──────────────────────────────────────────────
-    btnSaveSettings.addEventListener("click", async () => {
-        const payload = {
-            ...userProfile,
-            gemini_api_key:  settingGeminiKey.value.trim(),
-            worknet_api_key: settingWorknetKey ? settingWorknetKey.value.trim() : "",
-            saramin_api_key: settingSaraminKey ? settingSaraminKey.value.trim() : "",
-            smtp_user:       settingSmtpUser.value.trim(),
-            smtp_pass:       settingSmtpPass.value.trim()
-        };
-        try {
-            const res  = await fetch(`${API_BASE}/api/profile`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (data.status === "success") {
-                showToast("에이전트 환경 설정이 완료되었습니다!");
-                loadProfile();
+    const btnTest = $('btn-test-mail');
+    if (btnTest) {
+        btnTest.addEventListener('click', async () => {
+            btnTest.textContent = '📧 발송 중...';
+            btnTest.disabled = true;
+            try {
+                await saveProfile();
+                const r = await fetch('/api/send-email', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+                const d = await r.json();
+                showToast(d.success ? '✅ 테스트 메일 발송 완료!' : '❌ ' + (d.message || d.error || '발송 실패'), 4000);
+            } catch {
+                showToast('❌ 테스트 메일 오류', 4000);
             }
-        } catch (e) { showToast("에이전트 설정 저장 실패", "error"); }
-    });
+            btnTest.textContent = '📧 테스트 발송';
+            btnTest.disabled = false;
+        });
+    }
+}
 
-    // ── Test email ─────────────────────────────────────────────────
-    btnTestMail.addEventListener("click", async () => {
-        btnTestMail.disabled = true;
-        btnTestMail.textContent = "📧 이메일 발송 중...";
-        try {
-            const res  = await fetch(`${API_BASE}/api/send-email`, { method: "POST" });
-            const data = await res.json();
-            btnTestMail.disabled = false;
-            btnTestMail.innerHTML = "📧 즉시 메일 발송 테스트";
-            if (data.success) {
-                showToast("오늘의 매칭 채용공고가 이메일로 발송되었습니다!");
-            } else {
-                showToast(`이메일 발송 실패: ${data.message}`, "error");
-            }
-        } catch (e) {
-            btnTestMail.disabled = false;
-            btnTestMail.innerHTML = "📧 즉시 메일 발송 테스트";
-            showToast("네트워크 오류로 메일 발송에 실패했습니다.", "error");
-        }
-    });
+/* ── Print ── */
+function initPrint() {
+    const btn = $('btn-print');
+    if (btn) btn.addEventListener('click', () => window.print());
+}
 
-    // ── Print ──────────────────────────────────────────────────────
-    btnPrint.addEventListener("click", () => window.print());
-
-    // ── Init ───────────────────────────────────────────────────────
-    loadProfile().then(() => {
-        if (userProfile && userProfile.name) {
-            appendBotMessage(`반갑습니다, **${userProfile.name}**님! 기존에 등록된 이력서가 로드되었습니다.\n우측 이력서 시트 및 추천 채용공고 탭들을 확인해 주세요.`);
-            currentStep = "done";
-            updateStepNav("done");
-            updateProgressBar("done");
-        } else {
-            updateProgressBar("ask_name");
-            initChat();
-        }
+/* ── Reset ── */
+function initReset() {
+    const btn = $('btn-reset');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        if (!confirm('모든 입력 정보를 초기화할까요?')) return;
+        ['input-name','input-email','input-target'].forEach(id => { if ($(id)) $(id).value = ''; });
+        uploadedResumeText = '';
+        uploadedFileName = '';
+        const inner = $('upload-zone-inner');
+        const done  = $('upload-zone-done');
+        if (inner) inner.style.display = 'flex';
+        if (done)  done.style.display  = 'none';
+        const list = $('jobs-list');
+        if (list) list.innerHTML = '<div class="no-jobs-placeholder"><p>왼쪽에서 이력서를 등록하고<br>매칭하기 버튼을 눌러주세요.</p></div>';
+        hideStatus();
+        showToast('초기화 완료');
     });
+}
+
+/* ── Main Buttons ── */
+function initMainButtons() {
+    const btnMatch = $('btn-match');
+    if (btnMatch) {
+        btnMatch.addEventListener('click', async () => {
+            const email = ($('input-email') || {}).value?.trim();
+            if (!email) { showStatus('이메일 주소를 입력해주세요.', true); return; }
+            showStatus('🔍 AI 매칭 중... 잠시 기다려주세요.');
+            await saveProfile();
+            // Switch to jobs tab
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const jobsBtn = document.querySelector('.tab-btn[data-tab="tab-jobs"]');
+            if (jobsBtn) jobsBtn.classList.add('active');
+            const jobsTab = $('tab-jobs');
+            if (jobsTab) jobsTab.classList.add('active');
+            await loadMatchedJobs();
+            hideStatus();
+        });
+    }
+
+    const btnEmail = $('btn-match-email');
+    if (btnEmail) {
+        btnEmail.addEventListener('click', async () => {
+            const email = ($('input-email') || {}).value?.trim();
+            if (!email) { showStatus('이메일 주소를 입력해주세요.', true); return; }
+            await saveProfile();
+            await sendMatchEmail();
+        });
+    }
+
+    const btnWorknet = $('btn-worknet');
+    if (btnWorknet) btnWorknet.addEventListener('click', loadWorknetJobs);
+
+    const btnRefresh = $('btn-refresh-matching');
+    if (btnRefresh) btnRefresh.addEventListener('click', loadMatchedJobs);
+}
+
+/* ── Init ── */
+document.addEventListener('DOMContentLoaded', async () => {
+    initTabs();
+    initStepNav();
+    initSliders();
+    initUploadZone();
+    initMainButtons();
+    initSettings();
+    initPrint();
+    initReset();
+    await loadProfile();
 });

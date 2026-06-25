@@ -99,6 +99,7 @@ def init_db():
         ("worknet_api_key", "TEXT"),
         ("career", "TEXT DEFAULT '0'"),
         ("education", "TEXT DEFAULT '0'"),
+        ("resume_text", "TEXT"),
     ]:
         try:
             cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {default}")
@@ -442,9 +443,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
 
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length).decode('utf-8')
-        data = json.loads(body) if body else {}
+        content_type = self.headers.get("Content-Type", "")
+        content_length = int(self.headers.get('Content-Length', 0))
+
+        # Multipart upload is handled separately inside the /api/upload-resume branch
+        if "multipart/form-data" in content_type:
+            data = {}
+        else:
+            body = self.rfile.read(content_length).decode('utf-8') if content_length else ''
+            try:
+                data = json.loads(body) if body else {}
+            except Exception:
+                data = {}
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -473,6 +483,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Check if profile exists
             profile = query_db("SELECT id FROM profiles ORDER BY id DESC LIMIT 1", one=True)
 
+            resume_text = data.get("resume_text", "")
+            target_jobs = data.get("target_jobs", "") or data.get("target_job", "")
+
             if profile:
                 # Update existing profile
                 query_db("""
@@ -480,12 +493,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     name=?, email=?, phone=?, skills=?, experience=?, education=?,
                     target_jobs=?, min_salary=?, max_distance=?, exclude_shift=?,
                     gemini_api_key=?, saramin_api_key=?, worknet_api_key=?,
-                    smtp_user=?, smtp_pass=?, career=?
+                    smtp_user=?, smtp_pass=?, career=?, resume_text=?
                 WHERE id=?
                 """, (name, email, phone, skills, experience, education, target_jobs,
                       min_salary, max_distance, exclude_shift,
                       gemini_api_key, saramin_api_key, worknet_api_key,
-                      smtp_user, smtp_pass, career, profile["id"]))
+                      smtp_user, smtp_pass, career, resume_text, profile["id"]))
                 prof_id = profile["id"]
             else:
                 # Insert new profile
@@ -494,12 +507,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     name, email, phone, skills, experience, education,
                     target_jobs, min_salary, max_distance, exclude_shift,
                     gemini_api_key, saramin_api_key, worknet_api_key,
-                    smtp_user, smtp_pass, career
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    smtp_user, smtp_pass, career, resume_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (name, email, phone, skills, experience, education, target_jobs,
                       min_salary, max_distance, exclude_shift,
                       gemini_api_key, saramin_api_key, worknet_api_key,
-                      smtp_user, smtp_pass, career))
+                      smtp_user, smtp_pass, career, resume_text))
                 new_prof = query_db("SELECT id FROM profiles ORDER BY id DESC LIMIT 1", one=True)
                 prof_id = new_prof["id"] if new_prof else 1
 
@@ -632,8 +645,48 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
             matched = match_jobs(dict(profile), [dict(j) for j in all_jobs])
             self.wfile.write(json.dumps({"matched_jobs": matched}, ensure_ascii=False).encode('utf-8'))
 
+        elif path == "/api/match-jobs":
+            # Simple one-page form: match jobs from profile body data
+            profile_data = data.get("profile", {})
+            target  = (profile_data.get("target") or profile_data.get("target_job") or "").strip()
+            resume_text = (profile_data.get("resumeText") or "").strip()
+
+            # Extract keywords from target job and resume text
+            keywords = [k.strip() for k in re.split(r'[,\s/]+', target) if k.strip() and len(k.strip()) >= 2]
+            if resume_text:
+                for word in re.split(r'\s+', resume_text):
+                    w = word.strip(".,()[]{}")
+                    if 2 <= len(w) <= 8:
+                        keywords.append(w)
+            keywords = list(dict.fromkeys(keywords))[:12]
+
+            tmp_profile = {
+                "keywords": json.dumps(keywords, ensure_ascii=False),
+                "min_salary": int(profile_data.get("salary", 0) or 0),
+                "max_distance": int(profile_data.get("distance", 50) or 50),
+                "exclude_shift": 1 if profile_data.get("shift") else 0,
+            }
+
+            all_jobs = query_db("SELECT * FROM jobs")
+            matched = match_jobs(tmp_profile, [dict(j) for j in all_jobs])
+
+            raw_info = {
+                "name": profile_data.get("name", ""),
+                "email": profile_data.get("email", ""),
+                "phone": "",
+                "skills": target,
+                "experience": resume_text[:500] if resume_text else "",
+                "education": "",
+                "target_jobs": target,
+            }
+            ai_result = simulate_ai(raw_info)
+
+            self.wfile.write(json.dumps({
+                "jobs": matched,
+                "resume_html": ai_result.get("polishedResume", "")
+            }, ensure_ascii=False).encode('utf-8'))
+
         elif path == "/api/send-email":
-            # Trigger email report manually
             profile = query_db("SELECT * FROM profiles ORDER BY id DESC LIMIT 1", one=True)
             if not profile:
                 self.wfile.write(json.dumps({"error": "No user profile found."}, ensure_ascii=False).encode('utf-8'))
@@ -642,20 +695,18 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
             all_jobs = query_db("SELECT * FROM jobs")
             matched = match_jobs(dict(profile), [dict(j) for j in all_jobs])
 
-            # Send top 3 matched jobs
             success, msg = send_email_report(dict(profile), matched)
             self.wfile.write(json.dumps({"success": success, "message": msg}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/upload-resume":
-            # 이력서 파일(PDF/TXT) 업로드 → 텍스트 추출
-            import cgi, tempfile, os
-            content_type = self.headers.get("Content-Type", "")
-            if "multipart/form-data" not in content_type:
+            import cgi
+            content_type_hdr = self.headers.get("Content-Type", "")
+            if "multipart/form-data" not in content_type_hdr:
                 self.wfile.write(json.dumps({"error": "multipart/form-data 형식으로 업로드해 주세요."}, ensure_ascii=False).encode('utf-8'))
                 return
             form = cgi.FieldStorage(fp=self.rfile, headers=self.headers,
-                                    environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type})
-            file_item = form["file"] if "file" in form else None
+                                    environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type_hdr})
+            file_item = form.get("resume") or form.get("file")
             if not file_item:
                 self.wfile.write(json.dumps({"error": "파일을 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
                 return
@@ -678,22 +729,23 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
             self.wfile.write(json.dumps({"text": extracted.strip()[:3000]}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/worknet-jobs":
-            # 고용24(워크넷) 실제 채용공고 조회
             profile = query_db("SELECT * FROM profiles ORDER BY id DESC LIMIT 1", one=True)
             if not profile or not profile["worknet_api_key"]:
                 self.wfile.write(json.dumps({"error": "고용24 API 키가 설정되지 않았습니다."}, ensure_ascii=False).encode('utf-8'))
                 return
 
             api_key = profile["worknet_api_key"]
-            keywords_raw = profile["keywords"] or "[]"
-            try:
-                kw_list = json.loads(keywords_raw)
-                keyword = " ".join(kw_list[:2]) if kw_list else ""
-            except Exception:
-                keyword = profile.get("target_jobs", "") or ""
+            keyword = data.get("keyword", "").strip()
+            if not keyword:
+                keywords_raw = profile["keywords"] or "[]"
+                try:
+                    kw_list = json.loads(keywords_raw)
+                    keyword = " ".join(kw_list[:2]) if kw_list else ""
+                except Exception:
+                    keyword = profile.get("target_jobs", "") or ""
 
-            career_val    = profile["career"]    if profile["career"]    else "0"
-            education_val = profile["education"] if profile["education"] else "0"
+            career_val    = data.get("career",    profile["career"]    if profile["career"]    else "0")
+            education_val = data.get("education", profile["education"] if profile["education"] else "0")
 
             params = urllib.parse.urlencode({
                 "authKey":    api_key,
@@ -729,19 +781,20 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
                 self.wfile.write(json.dumps({"error": f"고용24 API 호출 실패: {str(e)}"}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/saramin-jobs":
-            # Fetch real jobs from Saramin Open API
             profile = query_db("SELECT saramin_api_key, keywords FROM profiles ORDER BY id DESC LIMIT 1", one=True)
             if not profile or not profile["saramin_api_key"]:
                 self.wfile.write(json.dumps({"error": "사람인 API 키가 설정되지 않았습니다."}, ensure_ascii=False).encode('utf-8'))
                 return
 
             api_key = profile["saramin_api_key"]
-            keywords_raw = profile["keywords"] or "[]"
-            try:
-                kw_list = json.loads(keywords_raw)
-                keyword = kw_list[0] if kw_list else ""
-            except Exception:
-                keyword = ""
+            keyword = data.get("keyword", "").strip()
+            if not keyword:
+                keywords_raw = profile["keywords"] or "[]"
+                try:
+                    kw_list = json.loads(keywords_raw)
+                    keyword = kw_list[0] if kw_list else ""
+                except Exception:
+                    keyword = ""
 
             params = urllib.parse.urlencode({
                 "access-key": api_key,
@@ -760,23 +813,9 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
                 self.wfile.write(json.dumps({"error": f"사람인 API 호출 실패: {str(e)}"}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/reset":
-            # Delete all profiles and sent_jobs to restart onboarding from scratch
             query_db("DELETE FROM sent_jobs")
             query_db("DELETE FROM profiles")
             self.wfile.write(json.dumps({"status": "reset_ok"}, ensure_ascii=False).encode('utf-8'))
-
-        elif path == "/api/reset":
-            # 이력서 정보만 초기화, API키/SMTP는 유지
-            query_db("""
-                UPDATE profiles SET
-                    name=NULL, email=NULL, phone=NULL, skills=NULL,
-                    experience=NULL, education=NULL, target_jobs=NULL,
-                    polished_resume=NULL, keywords=NULL,
-                    min_salary=0, max_distance=50, exclude_shift=0,
-                    onboarding_step='ask_name'
-                WHERE id=(SELECT max(id) FROM profiles)
-            """)
-            self.wfile.write(json.dumps({"status": "success"}, ensure_ascii=False).encode('utf-8'))
 
         else:
             self.send_response(404)
@@ -786,9 +825,7 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
 # Initialize database on startup
 init_db()
 
-# Run HTTP Server
 def run_server():
-    # Allow port re-use
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print(f"Serving local job agent at http://localhost:{PORT}")
