@@ -84,18 +84,27 @@ def init_db():
         exclude_shift INTEGER DEFAULT 0,
         gemini_api_key TEXT,
         saramin_api_key TEXT,
+        worknet_api_key TEXT,
         smtp_user TEXT,
         smtp_pass TEXT,
+        career TEXT DEFAULT '0',
+        education TEXT DEFAULT '0',
         onboarding_step TEXT DEFAULT 'start'
     )
     """)
 
-    # Add saramin_api_key column if upgrading from older schema
-    try:
-        cur.execute("ALTER TABLE profiles ADD COLUMN saramin_api_key TEXT")
-        conn.commit()
-    except Exception:
-        pass
+    # Add new columns if upgrading from older schema
+    for col, default in [
+        ("saramin_api_key", "TEXT"),
+        ("worknet_api_key", "TEXT"),
+        ("career", "TEXT DEFAULT '0'"),
+        ("education", "TEXT DEFAULT '0'"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {default}")
+            conn.commit()
+        except Exception:
+            pass
 
     # Create jobs table
     cur.execute("""
@@ -453,10 +462,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             min_salary = data.get("min_salary", 0)
             max_distance = data.get("max_distance", 50)
             exclude_shift = data.get("exclude_shift", 0)
-            gemini_api_key = data.get("gemini_api_key", "")
+            gemini_api_key  = data.get("gemini_api_key", "")
             saramin_api_key = data.get("saramin_api_key", "")
-            smtp_user = data.get("smtp_user", "")
-            smtp_pass = data.get("smtp_pass", "")
+            worknet_api_key = data.get("worknet_api_key", "")
+            smtp_user       = data.get("smtp_user", "")
+            smtp_pass       = data.get("smtp_pass", "")
+            career          = data.get("career", "0")
+            education       = data.get("education", "0")
 
             # Check if profile exists
             profile = query_db("SELECT id FROM profiles ORDER BY id DESC LIMIT 1", one=True)
@@ -467,10 +479,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 UPDATE profiles SET
                     name=?, email=?, phone=?, skills=?, experience=?, education=?,
                     target_jobs=?, min_salary=?, max_distance=?, exclude_shift=?,
-                    gemini_api_key=?, saramin_api_key=?, smtp_user=?, smtp_pass=?
+                    gemini_api_key=?, saramin_api_key=?, worknet_api_key=?,
+                    smtp_user=?, smtp_pass=?, career=?
                 WHERE id=?
                 """, (name, email, phone, skills, experience, education, target_jobs,
-                      min_salary, max_distance, exclude_shift, gemini_api_key, saramin_api_key, smtp_user, smtp_pass, profile["id"]))
+                      min_salary, max_distance, exclude_shift,
+                      gemini_api_key, saramin_api_key, worknet_api_key,
+                      smtp_user, smtp_pass, career, profile["id"]))
                 prof_id = profile["id"]
             else:
                 # Insert new profile
@@ -478,10 +493,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 INSERT INTO profiles (
                     name, email, phone, skills, experience, education,
                     target_jobs, min_salary, max_distance, exclude_shift,
-                    gemini_api_key, saramin_api_key, smtp_user, smtp_pass
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    gemini_api_key, saramin_api_key, worknet_api_key,
+                    smtp_user, smtp_pass, career
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (name, email, phone, skills, experience, education, target_jobs,
-                      min_salary, max_distance, exclude_shift, gemini_api_key, saramin_api_key, smtp_user, smtp_pass))
+                      min_salary, max_distance, exclude_shift,
+                      gemini_api_key, saramin_api_key, worknet_api_key,
+                      smtp_user, smtp_pass, career))
                 new_prof = query_db("SELECT id FROM profiles ORDER BY id DESC LIMIT 1", one=True)
                 prof_id = new_prof["id"] if new_prof else 1
 
@@ -627,6 +645,88 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
             # Send top 3 matched jobs
             success, msg = send_email_report(dict(profile), matched)
             self.wfile.write(json.dumps({"success": success, "message": msg}, ensure_ascii=False).encode('utf-8'))
+
+        elif path == "/api/upload-resume":
+            # 이력서 파일(PDF/TXT) 업로드 → 텍스트 추출
+            import cgi, tempfile, os
+            content_type = self.headers.get("Content-Type", "")
+            if "multipart/form-data" not in content_type:
+                self.wfile.write(json.dumps({"error": "multipart/form-data 형식으로 업로드해 주세요."}, ensure_ascii=False).encode('utf-8'))
+                return
+            form = cgi.FieldStorage(fp=self.rfile, headers=self.headers,
+                                    environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type})
+            file_item = form["file"] if "file" in form else None
+            if not file_item:
+                self.wfile.write(json.dumps({"error": "파일을 찾을 수 없습니다."}, ensure_ascii=False).encode('utf-8'))
+                return
+
+            file_data = file_item.file.read()
+            filename  = file_item.filename or ""
+            extracted = ""
+
+            if filename.lower().endswith(".pdf"):
+                try:
+                    import pypdf, io
+                    reader = pypdf.PdfReader(io.BytesIO(file_data))
+                    for page in reader.pages:
+                        extracted += (page.extract_text() or "") + "\n"
+                except ImportError:
+                    extracted = file_data.decode("utf-8", errors="ignore")
+            else:
+                extracted = file_data.decode("utf-8", errors="ignore")
+
+            self.wfile.write(json.dumps({"text": extracted.strip()[:3000]}, ensure_ascii=False).encode('utf-8'))
+
+        elif path == "/api/worknet-jobs":
+            # 고용24(워크넷) 실제 채용공고 조회
+            profile = query_db("SELECT * FROM profiles ORDER BY id DESC LIMIT 1", one=True)
+            if not profile or not profile["worknet_api_key"]:
+                self.wfile.write(json.dumps({"error": "고용24 API 키가 설정되지 않았습니다."}, ensure_ascii=False).encode('utf-8'))
+                return
+
+            api_key = profile["worknet_api_key"]
+            keywords_raw = profile["keywords"] or "[]"
+            try:
+                kw_list = json.loads(keywords_raw)
+                keyword = " ".join(kw_list[:2]) if kw_list else ""
+            except Exception:
+                keyword = profile.get("target_jobs", "") or ""
+
+            career_val    = profile["career"]    if profile["career"]    else "0"
+            education_val = profile["education"] if profile["education"] else "0"
+
+            params = urllib.parse.urlencode({
+                "authKey":    api_key,
+                "callTp":     "L",
+                "returnType": "JSON",
+                "keyword":    keyword,
+                "career":     career_val,
+                "education":  education_val,
+                "pageSize":   10,
+                "startPage":  1,
+            })
+            worknet_url = f"https://openapi.work.go.kr/opi/opi/opia/wantedApi.do?{params}"
+            try:
+                req = urllib.request.Request(worknet_url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    raw = response.read().decode("utf-8")
+                    wn_data = json.loads(raw)
+                    jobs = wn_data.get("wantedRoot", {}).get("wanted", [])
+                    result = []
+                    for j in jobs:
+                        result.append({
+                            "title":    j.get("title", ""),
+                            "company":  j.get("company", {}).get("companyName", ""),
+                            "location": j.get("location", {}).get("region", ""),
+                            "salary":   j.get("salary", {}).get("salaryName", ""),
+                            "career":   j.get("career", {}).get("careerName", ""),
+                            "education":j.get("education", {}).get("educationName", ""),
+                            "url":      f"https://www.work.go.kr/empInfo/empInfoSrch/detail/wantedAuthDetail.do?wantedAuthNo={j.get('wantedAuthNo','')}",
+                            "close_date": j.get("closeDate", ""),
+                        })
+                    self.wfile.write(json.dumps({"jobs": result, "keyword": keyword}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": f"고용24 API 호출 실패: {str(e)}"}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/saramin-jobs":
             # Fetch real jobs from Saramin Open API

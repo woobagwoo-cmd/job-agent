@@ -89,6 +89,15 @@
                         <button class="btn-reset" id="btn-reset" title="처음부터 다시 시작">🔄 초기화</button>
                     </div>
                 </div>
+                <!-- 이력서 파일 업로드 -->
+                <div class="resume-upload-bar" id="resume-upload-bar">
+                    <label for="resume-file-input" class="upload-label">
+                        <span class="upload-icon">📎</span>
+                        <span id="upload-filename">이력서 PDF/TXT 업로드로 빠르게 시작</span>
+                    </label>
+                    <input type="file" id="resume-file-input" accept=".pdf,.txt" style="display:none">
+                    <button class="btn-upload-go" id="btn-upload-go" style="display:none">분석 시작</button>
+                </div>
                 <div class="chat-container" id="chat-messages"></div>
                 <div class="chat-suggestions" id="chat-suggestions"></div>
                 <div class="chat-input-area">
@@ -149,6 +158,29 @@
                                     <span class="toggle-text">교대 근무(주야교대 등) 채용 공고 제외</span>
                                 </div>
                             </div>
+                            <div class="form-group">
+                                <label>경력 조건</label>
+                                <div class="select-row">
+                                    <select id="filter-career" class="filter-select">
+                                        <option value="0">관계없음 (신입/경력 전체)</option>
+                                        <option value="1">신입 지원 가능</option>
+                                        <option value="2">경력직 전용</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>학력 조건</label>
+                                <div class="select-row">
+                                    <select id="filter-education" class="filter-select">
+                                        <option value="0">학력무관</option>
+                                        <option value="1">고등학교 졸업 이상</option>
+                                        <option value="2">대학(2,3년제) 졸업 이상</option>
+                                        <option value="3">대학교(4년제) 졸업 이상</option>
+                                        <option value="4">석사 이상</option>
+                                        <option value="5">박사 이상</option>
+                                    </select>
+                                </div>
+                            </div>
                             <button class="btn btn-success" id="btn-save-filters">💾 필터 조건 저장</button>
                         </div>
                     </div>
@@ -158,7 +190,18 @@
                         <div class="matching-container">
                             <div class="matching-header">
                                 <h3>🎯 AI 실시간 추천 공고</h3>
-                                <button class="btn btn-secondary btn-sm" id="btn-refresh-matching">🔄 다시 매칭하기</button>
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn btn-secondary btn-sm" id="btn-worknet">🏛 고용24 실시간</button>
+                                    <button class="btn btn-secondary btn-sm" id="btn-refresh-matching">🔄 샘플 매칭</button>
+                                </div>
+                            </div>
+                            <!-- 고용24 실제 결과 -->
+                            <div id="worknet-section" style="display:none">
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                                    <span style="font-size:12px;color:var(--accent-green);font-weight:600;">● 고용24(워크넷) 실시간 채용공고</span>
+                                    <span id="worknet-keyword" style="font-size:11px;color:var(--text-muted);"></span>
+                                </div>
+                                <div class="matching-jobs-list" id="worknet-list"></div>
                             </div>
                             <div class="matching-jobs-list" id="jobs-list">
                                 <div class="no-jobs-placeholder">
@@ -187,6 +230,16 @@
                                 <label for="setting-gemini-key">Gemini API Key <span class="optional-badge">선택</span></label>
                                 <input type="password" id="setting-gemini-key" placeholder="AI 이력서 고도화를 위한 API 키">
                                 <p class="help-text"><a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--primary);">Google AI Studio</a>에서 무료 발급받으세요.</p>
+                            </div>
+
+                            <h4 class="sub-section-title">🏛 고용24(워크넷) 실제 채용공고 연동 <span class="optional-badge">선택</span></h4>
+                            <div class="saramin-notice">
+                                <strong>무료 공공 API</strong> — 고용24 API 키를 입력하면 실제 채용공고를 실시간으로 불러옵니다.
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-worknet-key">고용24 Open API Key</label>
+                                <input type="password" id="setting-worknet-key" placeholder="고용노동부 OpenAPI 키 입력">
+                                <p class="help-text"><a href="https://www.work.go.kr/empInfo/openApi/openApiMain.do" target="_blank" style="color:var(--primary);">고용24 OpenAPI</a>에서 신청 후 무료 발급받으세요.</p>
                             </div>
 
                             <h4 class="sub-section-title">🏢 사람인 채용공고 연동 <span class="optional-badge">선택</span></h4>

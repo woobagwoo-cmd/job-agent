@@ -695,6 +695,71 @@ body {
 .toast.show { transform: translateY(0); opacity: 1; }
 
 /* ================================================================
+   Resume Upload Bar
+   ================================================================ */
+.resume-upload-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 18px;
+    background: rgba(121, 93, 252, 0.06);
+    border-bottom: 1px solid rgba(121, 93, 252, 0.15);
+    flex-shrink: 0;
+}
+
+.upload-label {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; flex: 1;
+    font-size: 12.5px; color: var(--text-muted);
+    transition: var(--transition);
+}
+.upload-label:hover { color: var(--primary); }
+.upload-icon { font-size: 16px; }
+
+.btn-upload-go {
+    background: var(--primary); border: none;
+    border-radius: 8px; color: white;
+    padding: 5px 14px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: var(--transition);
+    font-family: var(--font-body);
+}
+.btn-upload-go:hover { filter: brightness(1.1); }
+
+/* Filter selects */
+.select-row { display: flex; gap: 10px; }
+.filter-select {
+    flex: 1; background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 9px; padding: 10px 13px;
+    color: white; outline: none; font-size: 13px;
+    font-family: var(--font-body); cursor: pointer;
+    transition: var(--transition);
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236B7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+}
+.filter-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(121,93,252,0.14); }
+.filter-select option { background: #1a2030; color: white; }
+
+/* Worknet job card */
+.worknet-card {
+    background: rgba(52,211,153,0.04);
+    border: 1px solid rgba(52,211,153,0.15);
+    border-left: 3px solid var(--accent-green);
+    border-radius: var(--radius-card);
+    padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: var(--transition);
+}
+.worknet-card:hover { background: rgba(52,211,153,0.07); transform: translateY(-2px); }
+.worknet-card h4 { font-size: 14.5px; font-weight: 700; }
+.worknet-card .company-meta { font-size: 12.5px; color: var(--text-muted); }
+.worknet-tag {
+    background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2);
+    color: var(--accent-green); padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 600;
+}
+
+/* ================================================================
    Print
    ================================================================ */
 @media print {

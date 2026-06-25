@@ -13,16 +13,29 @@ document.addEventListener("DOMContentLoaded", () => {
     const tabContents = document.querySelectorAll(".tab-content");
     const navItems    = document.querySelectorAll(".nav-item");
 
-    const filterSalary   = document.getElementById("filter-salary");
-    const valSalary      = document.getElementById("val-salary");
-    const filterDistance = document.getElementById("filter-distance");
-    const valDistance    = document.getElementById("val-distance");
-    const filterShift    = document.getElementById("filter-shift");
-    const btnSaveFilters = document.getElementById("btn-save-filters");
+    const filterSalary    = document.getElementById("filter-salary");
+    const valSalary       = document.getElementById("val-salary");
+    const filterDistance  = document.getElementById("filter-distance");
+    const valDistance     = document.getElementById("val-distance");
+    const filterShift     = document.getElementById("filter-shift");
+    const filterCareer    = document.getElementById("filter-career");
+    const filterEducation = document.getElementById("filter-education");
+    const btnSaveFilters  = document.getElementById("btn-save-filters");
     const btnRefreshMatching = document.getElementById("btn-refresh-matching");
-    const jobsList       = document.getElementById("jobs-list");
+    const btnWorknet      = document.getElementById("btn-worknet");
+    const jobsList        = document.getElementById("jobs-list");
+    const worknetSection  = document.getElementById("worknet-section");
+    const worknetList     = document.getElementById("worknet-list");
+    const worknetKeyword  = document.getElementById("worknet-keyword");
+
+    // 이력서 업로드
+    const resumeFileInput = document.getElementById("resume-file-input");
+    const uploadFilename  = document.getElementById("upload-filename");
+    const btnUploadGo     = document.getElementById("btn-upload-go");
+    let   uploadedFile    = null;
 
     const settingGeminiKey  = document.getElementById("setting-gemini-key");
+    const settingWorknetKey = document.getElementById("setting-worknet-key");
     const settingSaraminKey = document.getElementById("setting-saramin-key");
     const settingSmtpUser   = document.getElementById("setting-smtp-user");
     const settingSmtpPass   = document.getElementById("setting-smtp-pass");
@@ -259,6 +272,39 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    // ── 이력서 파일 업로드 ─────────────────────────────────────────
+    resumeFileInput.addEventListener("change", () => {
+        uploadedFile = resumeFileInput.files[0];
+        if (uploadedFile) {
+            uploadFilename.textContent = uploadedFile.name;
+            btnUploadGo.style.display = "block";
+        }
+    });
+
+    btnUploadGo.addEventListener("click", async () => {
+        if (!uploadedFile) return;
+        btnUploadGo.textContent = "분석 중...";
+        btnUploadGo.disabled = true;
+        const formData = new FormData();
+        formData.append("file", uploadedFile);
+        try {
+            const res  = await fetch(`${API_BASE}/api/upload-resume`, { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.error) { showToast(data.error, "error"); return; }
+            const text = data.text || "";
+            // 추출된 텍스트를 챗봇 입력에 반영 (첫 200자 미리보기)
+            appendBotMessage(`이력서 파일을 분석했습니다. 내용을 바탕으로 온보딩을 진행합니다.\n\n📄 추출된 텍스트 (앞부분 미리보기):\n${text.slice(0, 200)}...`);
+            showToast("이력서 업로드 완료! 챗봇에 내용이 반영됩니다.");
+            // 업로드 텍스트를 userProfile에 저장
+            userProfile._resumeText = text;
+        } catch (e) {
+            showToast("업로드 실패", "error");
+        } finally {
+            btnUploadGo.textContent = "분석 시작";
+            btnUploadGo.disabled = false;
+        }
+    });
+
     btnSend.addEventListener("click", sendMessage);
     chatInput.addEventListener("keypress", (e) => { if (e.key === "Enter") sendMessage(); });
 
@@ -296,7 +342,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 filterDistance.value = profile.max_distance || 30;
                 valDistance.textContent = `${profile.max_distance || 30} km 이내`;
                 filterShift.checked = profile.exclude_shift === 1;
+                if (filterCareer)    filterCareer.value    = profile.career    || "0";
+                if (filterEducation) filterEducation.value = profile.education || "0";
                 settingGeminiKey.value = profile.gemini_api_key || "";
+                if (settingWorknetKey) settingWorknetKey.value = profile.worknet_api_key || "";
                 if (settingSaraminKey) settingSaraminKey.value = profile.saramin_api_key || "";
                 settingSmtpUser.value = profile.smtp_user || "";
                 settingSmtpPass.value = profile.smtp_pass || "";
@@ -326,7 +375,9 @@ document.addEventListener("DOMContentLoaded", () => {
             ...userProfile,
             min_salary:    parseInt(filterSalary.value),
             max_distance:  parseInt(filterDistance.value),
-            exclude_shift: filterShift.checked ? 1 : 0
+            exclude_shift: filterShift.checked ? 1 : 0,
+            career:        filterCareer    ? filterCareer.value    : "0",
+            education:     filterEducation ? filterEducation.value : "0",
         };
         try {
             const res  = await fetch(`${API_BASE}/api/profile`, {
@@ -411,11 +462,57 @@ document.addEventListener("DOMContentLoaded", () => {
 
     btnRefreshMatching.addEventListener("click", loadMatchedJobs);
 
+    // ── 고용24 실시간 채용공고 ─────────────────────────────────────
+    if (btnWorknet) {
+        btnWorknet.addEventListener("click", async () => {
+            worknetSection.style.display = "block";
+            jobsList.style.display = "none";
+            worknetList.innerHTML = "<div class='no-jobs-placeholder'><p>🏛 고용24 실시간 채용공고 검색 중...</p></div>";
+            try {
+                const res  = await fetch(`${API_BASE}/api/worknet-jobs`, { method: "POST" });
+                const data = await res.json();
+                if (data.error) {
+                    worknetList.innerHTML = `<div class='no-jobs-placeholder'><p>⚠️ ${data.error}</p></div>`;
+                    return;
+                }
+                const jobs = data.jobs || [];
+                if (worknetKeyword) worknetKeyword.textContent = `키워드: "${data.keyword}"`;
+                if (jobs.length === 0) {
+                    worknetList.innerHTML = "<div class='no-jobs-placeholder'><p>검색 결과가 없습니다. 필터 조건을 조정해 보세요.</p></div>";
+                    return;
+                }
+                worknetList.innerHTML = "";
+                jobs.forEach(job => {
+                    const card = document.createElement("div");
+                    card.classList.add("worknet-card");
+                    card.innerHTML = `
+                        <h4>${job.title}</h4>
+                        <span class="company-meta">${job.company} &nbsp;|&nbsp; ${job.location}</span>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <span class="worknet-tag">💼 ${job.career || '경력무관'}</span>
+                            <span class="worknet-tag">🎓 ${job.education || '학력무관'}</span>
+                            ${job.salary ? `<span class="worknet-tag">💵 ${job.salary}</span>` : ""}
+                            ${job.close_date ? `<span class="job-tag">📅 마감 ${job.close_date}</span>` : ""}
+                        </div>
+                        <div style="display:flex;justify-content:flex-end;">
+                            <a href="${job.url}" target="_blank" class="btn btn-success btn-sm" style="text-decoration:none;">고용24에서 보기 →</a>
+                        </div>
+                    `;
+                    worknetList.appendChild(card);
+                });
+            } catch (e) {
+                worknetList.innerHTML = "<div class='no-jobs-placeholder'><p>고용24 연결 오류</p></div>";
+                console.error(e);
+            }
+        });
+    }
+
     // ── Save settings ──────────────────────────────────────────────
     btnSaveSettings.addEventListener("click", async () => {
         const payload = {
             ...userProfile,
             gemini_api_key:  settingGeminiKey.value.trim(),
+            worknet_api_key: settingWorknetKey ? settingWorknetKey.value.trim() : "",
             saramin_api_key: settingSaraminKey ? settingSaraminKey.value.trim() : "",
             smtp_user:       settingSmtpUser.value.trim(),
             smtp_pass:       settingSmtpPass.value.trim()
