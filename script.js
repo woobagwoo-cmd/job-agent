@@ -5,6 +5,7 @@
 /* ── State ── */
 let uploadedResumeText = '';
 let uploadedFileName  = '';
+let lastMatchedJobs   = [];   // mailto에서 재사용
 
 /* ── DOM helpers ── */
 const $ = id => document.getElementById(id);
@@ -249,6 +250,7 @@ async function loadMatchedJobs() {
         });
         const data = await resp.json();
         const jobs = data.jobs || [];
+        lastMatchedJobs = jobs;
         if (jobs.length === 0) {
             list.innerHTML = '<div class="no-jobs-placeholder"><p>매칭된 공고가 없습니다.<br>이력서와 희망 직무를 확인해주세요.</p></div>';
         } else {
@@ -309,54 +311,55 @@ function showResumePreview(html) {
     }
 }
 
-/* ── Send Email ── */
-async function sendMatchEmail() {
-    showStatus('📧 이메일 발송 중...');
-    try {
-        await saveProfile();
-        const resp = await fetch('/api/send-email', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-        const data = await resp.json();
-        if (data.success) {
-            showStatus('✅ 매칭 결과가 이메일로 발송되었습니다!');
-            showToast('이메일이 발송되었습니다!');
-        } else {
-            showStatus('이메일 발송 실패: ' + (data.message || data.error || '알 수 없는 오류'), true);
-        }
-    } catch (e) {
-        showStatus('이메일 발송 중 오류가 발생했습니다.', true);
-    }
-}
+/* ── Mailto 방식 이메일 ── */
+function openMailto() {
+    const email  = ($('input-email')  || {}).value?.trim() || '';
+    const name   = ($('input-name')   || {}).value?.trim() || '안녕하세요';
+    const target = ($('input-target') || {}).value?.trim() || '채용';
+    const today  = new Date().toLocaleDateString('ko-KR');
 
-/* ── SMTP Settings ── */
-function initSettings() {
-    const btnSave = $('btn-save-settings');
-    if (btnSave) {
-        btnSave.addEventListener('click', async () => {
-            try {
-                await saveProfile();
-                showToast('✅ 설정이 저장되었습니다!');
-            } catch (e) {
-                showToast('저장 중 오류가 발생했습니다.', 4000);
-            }
-        });
+    if (!email) { showStatus('이메일 주소를 입력해주세요.', true); return; }
+
+    if (lastMatchedJobs.length === 0) {
+        showStatus('먼저 "채용공고 매칭하기"를 눌러 결과를 불러오세요.', true);
+        return;
     }
 
-    const btnTest = $('btn-test-mail');
-    if (btnTest) {
-        btnTest.addEventListener('click', async () => {
-            btnTest.textContent = '📧 발송 중...';
-            btnTest.disabled = true;
-            try {
-                await saveProfile();
-                const r = await fetch('/api/send-email', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-                const d = await r.json();
-                showToast(d.success ? '✅ 테스트 메일 발송 완료!' : '❌ ' + (d.message || d.error || '발송 실패'), 4000);
-            } catch {
-                showToast('❌ 테스트 메일 오류', 4000);
-            }
-            btnTest.textContent = '📧 테스트 발송';
-            btnTest.disabled = false;
-        });
+    const subject = encodeURIComponent(`[AI 잡에이전트] ${target} 매칭 결과 - ${today}`);
+
+    const lines = [];
+    lines.push(`${name}님, AI 잡에이전트 매칭 결과입니다.`);
+    lines.push(`희망 직무: ${target} | 날짜: ${today}`);
+    lines.push('');
+    lines.push(`=== 매칭 공고 (${lastMatchedJobs.length}건) ===`);
+    lines.push('');
+
+    lastMatchedJobs.slice(0, 10).forEach((job, i) => {
+        lines.push(`${i + 1}. [${job.company || ''}] ${job.title || ''}`);
+        const meta = [];
+        if (job.location) meta.push(job.location);
+        if (job.salary)   meta.push(job.salary);
+        if (job.match_score) meta.push(`매칭 ${job.match_score}%`);
+        if (meta.length) lines.push(`   ${meta.join(' | ')}`);
+        if (job.url) lines.push(`   ${job.url}`);
+        lines.push('');
+    });
+
+    lines.push('---');
+    lines.push('JobAgent AI 매칭 시스템');
+
+    const body = encodeURIComponent(lines.join('\n'));
+    const mailto = `mailto:${email}?subject=${subject}&body=${body}`;
+
+    // mailto URL 길이 제한(2000자) 초과 시 클립보드 fallback
+    if (mailto.length > 1900) {
+        const short = `mailto:${email}?subject=${subject}`;
+        window.location.href = short;
+        showToast('결과가 너무 길어 제목만 입력됐습니다. 본문을 직접 붙여넣으세요.');
+    } else {
+        window.location.href = mailto;
+        showStatus('✅ 이메일 앱이 열립니다. 내용 확인 후 직접 발송하세요.');
+        showToast('이메일 앱 열기 완료!');
     }
 }
 
@@ -409,13 +412,9 @@ function initMainButtons() {
 
     const btnEmail = $('btn-match-email');
     if (btnEmail) {
-        btnEmail.addEventListener('click', async () => {
-            const email = ($('input-email') || {}).value?.trim();
-            if (!email) { showStatus('이메일 주소를 입력해주세요.', true); return; }
-            await saveProfile();
-            await sendMatchEmail();
-        });
+        btnEmail.addEventListener('click', openMailto);
     }
+
 
     const btnWorknet = $('btn-worknet');
     if (btnWorknet) btnWorknet.addEventListener('click', loadWorknetJobs);
@@ -424,14 +423,13 @@ function initMainButtons() {
     if (btnRefresh) btnRefresh.addEventListener('click', loadMatchedJobs);
 }
 
-/* ── Init ── */
+/* -- Init -- */
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
     initStepNav();
     initSliders();
     initUploadZone();
     initMainButtons();
-    initSettings();
     initPrint();
     initReset();
     await loadProfile();

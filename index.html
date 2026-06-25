@@ -34,10 +34,6 @@
                     <span class="step-num">2</span>
                     <span class="step-lbl">추천 공고</span>
                 </div>
-                <div class="nav-item" id="nav-settings">
-                    <span class="step-num">3</span>
-                    <span class="step-lbl">메일 설정</span>
-                </div>
             </nav>
         </header>
 
@@ -161,7 +157,6 @@
                 <div class="tabs-header">
                     <button class="tab-btn active" data-tab="tab-jobs">🔍 매칭 공고</button>
                     <button class="tab-btn" data-tab="tab-resume">📄 이력서 미리보기</button>
-                    <button class="tab-btn" data-tab="tab-settings">✉️ 메일 설정</button>
                 </div>
 
                 <div class="tab-contents">
@@ -205,43 +200,6 @@
                         </div>
                     </div>
 
-                    <!-- Tab 3: Mail Settings -->
-                    <div class="tab-content" id="tab-settings">
-                        <div class="agent-settings-form">
-                            <h3>✉️ 데일리 메일 설정</h3>
-                            <p class="form-desc">매일 아침 매칭 채용공고를 이메일로 받으려면 발송 계정을 등록하세요.</p>
-
-                            <div class="optional-notice">
-                                <p>💡 <strong>선택사항입니다.</strong> 설정하지 않으면 화면에서만 결과를 확인할 수 있습니다.</p>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="setting-smtp-user">발송용 이메일 주소</label>
-                                <input type="email" id="setting-smtp-user" placeholder="your-email@gmail.com">
-                                <p class="help-text">Gmail, Naver, Daum, Outlook, Nate 지원</p>
-                            </div>
-                            <div class="form-group">
-                                <label for="setting-smtp-pass">앱 비밀번호</label>
-                                <input type="password" id="setting-smtp-pass" placeholder="앱 비밀번호 (일반 로그인 비밀번호 아님)">
-                                <p class="help-text">
-                                    Gmail: <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--primary);">앱 비밀번호 발급</a> &nbsp;|&nbsp;
-                                    Naver: 메일 환경설정 → POP3/IMAP → 앱 비밀번호
-                                </p>
-                            </div>
-
-                            <div class="agent-actions">
-                                <button class="btn btn-success" id="btn-save-settings">💾 저장</button>
-                                <button class="btn btn-primary" id="btn-test-mail">📧 테스트 발송</button>
-                            </div>
-
-                            <div class="scheduler-status" style="margin-top:24px;">
-                                <h4>📅 스케줄 정보</h4>
-                                <div class="status-card">
-                                    <p><strong>상태:</strong> <span class="badge badge-success">활성화됨 (매일 08:00)</span></p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </section>
         </main>
