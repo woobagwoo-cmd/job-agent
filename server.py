@@ -83,11 +83,19 @@ def init_db():
         max_distance INTEGER DEFAULT 50,
         exclude_shift INTEGER DEFAULT 0,
         gemini_api_key TEXT,
+        saramin_api_key TEXT,
         smtp_user TEXT,
         smtp_pass TEXT,
         onboarding_step TEXT DEFAULT 'start'
     )
     """)
+
+    # Add saramin_api_key column if upgrading from older schema
+    try:
+        cur.execute("ALTER TABLE profiles ADD COLUMN saramin_api_key TEXT")
+        conn.commit()
+    except Exception:
+        pass
 
     # Create jobs table
     cur.execute("""
@@ -199,11 +207,13 @@ def simulate_ai(raw_info):
 
     keywords = list(set(keywords))[:5]
 
+    skill_tags = "".join([f'<span class="resume-skill-tag">{k}</span>' for k in keywords])
+
     polished_html = f"""
     <div class="resume-container">
         <header class="resume-header">
             <h1>{name}</h1>
-            <p class="resume-contact">📞 {phone} | ✉️ {email}</p>
+            <p class="resume-contact">📞 {phone}&nbsp;&nbsp;✉️ {email}</p>
         </header>
         <section class="resume-section">
             <h2>🎯 희망 직무</h2>
@@ -211,9 +221,7 @@ def simulate_ai(raw_info):
         </section>
         <section class="resume-section">
             <h2>🛠️ 핵심 역량 및 보유 기술</h2>
-            <ul>
-                {"".join([f"<li>{k}</li>" for k in keywords])}
-            </ul>
+            <div class="resume-skills">{skill_tags}</div>
         </section>
         <section class="resume-section">
             <h2>💼 경력 사항</h2>
@@ -446,6 +454,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             max_distance = data.get("max_distance", 50)
             exclude_shift = data.get("exclude_shift", 0)
             gemini_api_key = data.get("gemini_api_key", "")
+            saramin_api_key = data.get("saramin_api_key", "")
             smtp_user = data.get("smtp_user", "")
             smtp_pass = data.get("smtp_pass", "")
 
@@ -458,10 +467,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 UPDATE profiles SET
                     name=?, email=?, phone=?, skills=?, experience=?, education=?,
                     target_jobs=?, min_salary=?, max_distance=?, exclude_shift=?,
-                    gemini_api_key=?, smtp_user=?, smtp_pass=?
+                    gemini_api_key=?, saramin_api_key=?, smtp_user=?, smtp_pass=?
                 WHERE id=?
                 """, (name, email, phone, skills, experience, education, target_jobs,
-                      min_salary, max_distance, exclude_shift, gemini_api_key, smtp_user, smtp_pass, profile["id"]))
+                      min_salary, max_distance, exclude_shift, gemini_api_key, saramin_api_key, smtp_user, smtp_pass, profile["id"]))
                 prof_id = profile["id"]
             else:
                 # Insert new profile
@@ -469,10 +478,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 INSERT INTO profiles (
                     name, email, phone, skills, experience, education,
                     target_jobs, min_salary, max_distance, exclude_shift,
-                    gemini_api_key, smtp_user, smtp_pass
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    gemini_api_key, saramin_api_key, smtp_user, smtp_pass
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (name, email, phone, skills, experience, education, target_jobs,
-                      min_salary, max_distance, exclude_shift, gemini_api_key, smtp_user, smtp_pass))
+                      min_salary, max_distance, exclude_shift, gemini_api_key, saramin_api_key, smtp_user, smtp_pass))
                 new_prof = query_db("SELECT id FROM profiles ORDER BY id DESC LIMIT 1", one=True)
                 prof_id = new_prof["id"] if new_prof else 1
 
@@ -618,6 +627,37 @@ AI 분석을 통해 추출된 매칭 키워드는 **[{', '.join(ai_res['keywords
             # Send top 3 matched jobs
             success, msg = send_email_report(dict(profile), matched)
             self.wfile.write(json.dumps({"success": success, "message": msg}, ensure_ascii=False).encode('utf-8'))
+
+        elif path == "/api/saramin-jobs":
+            # Fetch real jobs from Saramin Open API
+            profile = query_db("SELECT saramin_api_key, keywords FROM profiles ORDER BY id DESC LIMIT 1", one=True)
+            if not profile or not profile["saramin_api_key"]:
+                self.wfile.write(json.dumps({"error": "사람인 API 키가 설정되지 않았습니다."}, ensure_ascii=False).encode('utf-8'))
+                return
+
+            api_key = profile["saramin_api_key"]
+            keywords_raw = profile["keywords"] or "[]"
+            try:
+                kw_list = json.loads(keywords_raw)
+                keyword = kw_list[0] if kw_list else ""
+            except Exception:
+                keyword = ""
+
+            params = urllib.parse.urlencode({
+                "access-key": api_key,
+                "keywords": keyword,
+                "count": 10,
+                "fields": "job-title,company,salary,expiration-date,job-category,location-code",
+            })
+            saramin_url = f"https://oapi.saramin.co.kr/job-search?{params}"
+            try:
+                req = urllib.request.Request(saramin_url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    saramin_data = json.loads(response.read().decode("utf-8"))
+                    jobs = saramin_data.get("jobs", {}).get("job", [])
+                    self.wfile.write(json.dumps({"jobs": jobs, "count": len(jobs)}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": f"사람인 API 호출 실패: {str(e)}"}, ensure_ascii=False).encode('utf-8'))
 
         elif path == "/api/reset":
             # Delete all profiles and sent_jobs to restart onboarding from scratch
